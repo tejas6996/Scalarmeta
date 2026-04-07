@@ -1,0 +1,149 @@
+name: village-microgrid-energy-management
+version: "1.0.0"
+tags:
+  - openenv
+  - energy
+  - reinforcement-learning
+description: >
+  An OpenEnv-compatible RL environment where an agent controls a village
+  microgrid over a 24- or 72-hour horizon. The agent balances solar
+  generation, battery storage, and grid imports to meet critical and
+  residential electricity demand.
+
+author: "participant"
+license: MIT
+
+# ---------------------------------------------------------------------------
+# Observation space
+# ---------------------------------------------------------------------------
+observation:
+  type: object
+  description: "Snapshot of the microgrid state at the start of each hourly step."
+  properties:
+    step_hour:
+      type: integer
+      minimum: 0
+      maximum: 71
+      description: "Current simulation hour (0-based)."
+    solar_gen_kwh:
+      type: number
+      minimum: 0
+      description: "Solar energy available this hour (kWh)."
+    battery_soc_kwh:
+      type: number
+      minimum: 0
+      description: "Battery state-of-charge (kWh)."
+    critical_demand_kwh:
+      type: number
+      minimum: 0
+      description: "Non-negotiable demand (hospital, water pump) in kWh."
+    residential_demand_kwh:
+      type: number
+      minimum: 0
+      description: "Sheddable residential demand in kWh."
+
+# ---------------------------------------------------------------------------
+# Action space
+# ---------------------------------------------------------------------------
+action:
+  type: object
+  description: "The agent's decisions for a single hour step."
+  properties:
+    grid_import_kwh:
+      type: number
+      minimum: 0
+      description: "Power purchased from the main grid (kWh). Incurs a reward penalty."
+    battery_action_kwh:
+      type: number
+      description: "Battery action. Positive = charge; negative = discharge."
+    residential_supplied_kwh:
+      type: number
+      minimum: 0
+      description: "How much of the residential demand the agent fulfils (kWh)."
+
+# ---------------------------------------------------------------------------
+# Reward
+# ---------------------------------------------------------------------------
+reward:
+  type: number
+  description: >
+    Per-step scalar reward.
+    +1.0  base survival reward
+    -5.0 × unmet_critical_kwh
+    -0.5 × unmet_residential_kwh
+    -0.1 × grid_import_kwh
+    -1.0 × invalid_action_count
+
+# ---------------------------------------------------------------------------
+# Tasks
+# ---------------------------------------------------------------------------
+tasks:
+  - name: task1_summer_day
+    difficulty: easy
+    description: >
+      Perfect summer day. High solar generation, low demand.
+      Battery starts empty. The agent should charge the battery using solar
+      and serve 100% of demand.
+    max_steps: 24
+    score_range: [0.0, 1.0]
+    grader: Task1Grader
+
+  - name: task2_winter_night
+    difficulty: medium
+    description: >
+      Winter near-blackout. Minimal solar generation. Battery starts full.
+      The agent must ration battery discharge, carefully import grid power,
+      and potentially shed residential load to keep critical systems alive.
+    max_steps: 24
+    score_range: [0.0, 1.0]
+    grader: Task2Grader
+
+  - name: task3_rolling_blackout
+    difficulty: hard
+    description: >
+      72-hour rolling blackout. Erratic weather causes unpredictable solar
+      spikes and drops. A hard cap of 3 kWh/step on grid imports forces
+      aggressive battery management and residential load queuing.
+    max_steps: 72
+    score_range: [0.0, 1.0]
+    grader: Task3Grader
+
+# ---------------------------------------------------------------------------
+# Hardware constraints
+# ---------------------------------------------------------------------------
+hardware:
+  battery_capacity_kwh: 40.0
+  battery_max_charge_rate_kwh_per_step: 10.0
+  battery_max_discharge_rate_kwh_per_step: 10.0
+  task3_grid_import_cap_kwh_per_step: 3.0
+
+# ---------------------------------------------------------------------------
+# API endpoints (served by app.py)
+# ---------------------------------------------------------------------------
+endpoints:
+  reset:
+    method: POST
+    path: /reset
+    description: "Start a new episode. Body: {task_name: string}"
+  step:
+    method: POST
+    path: /step
+    description: "Advance one hour step. Body: {action: Action}"
+  state:
+    method: GET
+    path: /state
+    description: "Return the full internal state snapshot."
+  tasks:
+    method: GET
+    path: /tasks
+    description: "List all supported task names."
+  grade:
+    method: POST
+    path: /grade
+    description: "Grade the completed episode. Returns score in [0, 1]."
+
+runtime:
+  port: 7860
+  inference_timeout_minutes: 20
+  max_vcpu: 2
+  max_memory_gb: 8
