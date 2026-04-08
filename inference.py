@@ -431,30 +431,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-# ---------------------------------------------------------------------------
-# Entry point — run all 3 tasks
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    # Set use_llm=False to run in pure-heuristic mode (no API needed).
-    # Set use_llm=True to use the LLM defined by API_BASE_URL / MODEL_NAME.
-    use_llm = bool(HF_TOKEN)
-
-    results = []
-    for task in VillageMicrogridEnv.SUPPORTED_TASKS:
-        summary = run_task(task_name=task, use_llm=use_llm)
-        results.append(summary)
-
-    # Final summary table
-    print("\n" + "=" * 60, flush=True)
-    print("FINAL SCORES", flush=True)
-    print("=" * 60, flush=True)
-    for r in results:
-        print(
-            f"  {r['task']:35s}  score={r['score']:.4f}  "
-            f"reward={r['total_reward']:8.2f}  blackouts={r['critical_failures']}",
-            flush=True,
-        )
-    print("=" * 60, flush=True)
