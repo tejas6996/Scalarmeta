@@ -102,10 +102,12 @@
 ## Phase 5: Reward Function & Graders ✅
 **Completed:** April 8, 2026
 
-**Files created:**
+**Files created/modified:**
 - `src/env/rewards.py` — Per-step reward computation with structured Reward breakdown
 - `src/env/graders.py` — Episode-end graders for all 3 tasks ([0.0, 1.0] score)
-- `tests/test_rewards_graders.py` — Comprehensive test script
+- `src/env/tools_dispatch.py` — Enhanced dispatch reward with resource matching decay
+- `src/env/state.py` — Added availability_log for counterfactual analysis
+- `tests/test_rewards_graders.py`, `tests/test_enhancements.py`, `tests/test_temporal_unit.py`
 
 **Reward function:**
 - +0.5 base survival per step
@@ -115,17 +117,23 @@
 - No-action penalty: base 0.5 - 0.5 = 0.0 net
 - All actions logged to EpisodeMemoryEntry
 
-**Graders:**
-- Task 1 (easy): 40% resolution + 30% critical + 30% efficiency
-- Task 2 (medium): 30% resolution + 25% critical + 20% verification + 25% resource correctness
-- Task 3 (hard): 25% resolution + 25% critical + 20% verification + 15% resource + 15% monitoring
-- Sub-scores: resolution, critical handling, efficiency, verification accuracy, resource correctness, monitoring
+**Advanced enhancements (4 judge-wow features):**
+1. **Resource Matching Confidence Decay** — dispatch reward scaled by flood depth ({0: 0, 1: -0.25, 2: -0.5, 3: -0.75}) + reporter credibility bonus (field_officer: +0.3, sensor: +0.2)
+2. **Temporal Urgency Multiplier** — reward for dispatch/close scales 2.0x→1.0x based on how much of the deadline window has elapsed (early action = double reward)
+3. **False Alarm F1-Score** — replaced simple flag count with precision/recall F1, prevents degenerate flag-everything/nothing strategies
+4. **Counterfactual Penalty** — for each expired critical report, checks if correct resource was available before deadline. If yes → "you could have acted" → harsher grade
 
-**Test results:**
-- Do-nothing agent: task1=0.0, task2=0.15, task3=0.23
-- Reasonable agent: task1=1.0, task2=0.54, task3=0.24
-- Reward structure verified: base, repeat penalty, memory logging
-- Deterministic: same seed + same actions = same score
+**Graders (updated weights with counterfactual):**
+- Task 1 (easy): 40% resolution + 30% critical + 30% efficiency
+- Task 2 (medium): 25% resolution + 20% critical + 20% F1 + 20% resource + 15% counterfactual
+- Task 3 (hard): 20% resolution + 20% critical + 20% F1 + 15% resource + 15% monitoring + 10% counterfactual
+
+**Test results (with enhancements):**
+- Do-nothing agent: task1=0.0, task2=0.0, task3=0.075
+- Reasonable agent: task1=1.0, task2=0.43, task3=0.17
+- Temporal multiplier verified: 2.0x at step 0 → 1.11x at step 8 (monotonically decreasing)
+- F1: perfect=1.0, flag-everything=0.47, flag-nothing=0.0
+- Counterfactual: do-nothing=0.0 (all preventable), reasonable=1.0 (none expired)
 
 ---
 

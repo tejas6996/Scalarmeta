@@ -112,10 +112,23 @@ def send_resource(
     # Create the assignment
     asg = state.create_assignment(resource_id, report_id, travel_steps)
 
-    # Compute reward
+    # Compute reward with resource matching confidence decay
     gt = state.ground_truth.get(report_id, {})
     verdict = gt.get("verdict", "real")
     reward = 0.0
+
+    # Flood depth penalty: harder conditions reduce reward
+    flood_depth = zone.flood_depth_level if zone else 0
+    _FLOOD_PENALTY = {0: 0.0, 1: -0.25, 2: -0.5, 3: -0.75}
+    flood_adj = _FLOOD_PENALTY.get(flood_depth, 0.0)
+
+    # Reporter credibility bonus
+    _CRED_BONUS = {
+        "field_officer": 0.3,
+        "automated_sensor": 0.2,
+        "citizen": 0.0,
+    }
+    cred_bonus = _CRED_BONUS.get(report.reporter_type.value, 0.0)
 
     if verdict in ("false", "duplicate"):
         # Dispatching to a false/duplicate report
@@ -129,7 +142,7 @@ def send_resource(
         # Real report — check resource type match
         gt_resource = gt.get("required_resource", None)
         if gt_resource and resource.type.value == gt_resource:
-            reward = 2.0  # correct resource type
+            reward = 2.0 + flood_adj + cred_bonus  # correct type, adjusted for conditions
             result = (
                 f"Dispatched {resource_id} ({resource.type.value}) → report {report_id}. "
                 f"Assignment {asg.id} created, ETA step {asg.expected_completion_step}. "
@@ -143,7 +156,7 @@ def send_resource(
                 f"Note: This resource type may not be ideal for this incident."
             )
         else:
-            reward = 1.0  # dispatched to real, no specific type requirement
+            reward = 1.0 + flood_adj + cred_bonus  # dispatched to real, no specific type
             result = (
                 f"Dispatched {resource_id} ({resource.type.value}) → report {report_id}. "
                 f"Assignment {asg.id} created, ETA step {asg.expected_completion_step}."
