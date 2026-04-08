@@ -14,7 +14,13 @@ print("=" * 60)
 print("TEST 1: Full episode — task1_flood_easy")
 print("=" * 60)
 
-obs = env.reset("task1_flood_easy", seed=42)
+reset_result = env.reset("task1_flood_easy", seed=42)
+assert "observation" in reset_result, "reset() must return {observation, reward, done, info}"
+assert "reward" in reset_result, "reset() must include reward"
+assert "done" in reset_result, "reset() must include done"
+assert reset_result["done"] is False, "reset() done must be False"
+assert reset_result["reward"] == 0.0, "reset() reward must be 0.0"
+obs = reset_result["observation"]
 print(f"  Step: {obs['step']}/{obs['max_steps']}")
 print(f"  Pending reports: {len(obs['pending_reports'])}")
 print(f"  Resources: {len(obs['available_resources'])}")
@@ -86,14 +92,14 @@ print("=" * 60)
 
 for task in env.supported_tasks():
     # Do-nothing
-    obs = env.reset(task, seed=42)
+    obs = env.reset(task, seed=42)["observation"]
     while not env.is_done:
         result = env.step({"tool": "get_resources", "args": {}})
         obs = result["observation"]
     dn_grade = env.grade()
 
     # Reasonable agent — flood-aware strategy
-    obs = env.reset(task, seed=42)
+    obs = env.reset(task, seed=42)["observation"]
     # Build zone flood lookup
     zone_flood = {z["id"]: z["flood_depth_level"] for z in obs.get("zones", [])}
     while not env.is_done:
@@ -139,7 +145,7 @@ print("=" * 60)
 print("TEST 3: Malformed action handling")
 print("=" * 60)
 
-obs = env.reset("task1_flood_easy", seed=42)
+obs = env.reset("task1_flood_easy", seed=42)["observation"]
 
 # Empty tool
 result = env.step({"tool": "", "args": {}})
@@ -166,10 +172,11 @@ print("=" * 60)
 print("TEST 4: Observation is JSON-serializable")
 print("=" * 60)
 
-obs = env.reset("task2_storm_medium", seed=42)
-json_str = json.dumps(obs)
-print(f"  Observation JSON size: {len(json_str)} bytes")
-assert len(json_str) > 100, "Observation should have meaningful content"
+reset_result = env.reset("task2_storm_medium", seed=42)
+json_str = json.dumps(reset_result)
+print(f"  Reset result JSON size: {len(json_str)} bytes")
+assert len(json_str) > 100, "Reset result should have meaningful content"
+assert "observation" in reset_result
 
 result = env.step({"tool": "get_resources", "args": {}})
 json_str2 = json.dumps(result)

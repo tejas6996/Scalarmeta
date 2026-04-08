@@ -18,8 +18,8 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY --chown=user . .
 
 # ── Runtime environment variables (override in HF Spaces secrets) ────────────
-ENV API_BASE_URL="https://api.openai.com/v1"
-ENV MODEL_NAME="gpt-4o-mini"
+ENV API_BASE_URL="https://router.huggingface.co/novita/v3/openai"
+ENV MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
 ENV HF_TOKEN=""
 ENV PORT=7860
 ENV PYTHONPATH="/app"

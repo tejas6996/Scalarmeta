@@ -50,7 +50,13 @@ print("=" * 60)
 # Reset
 resp = client.post("/reset", json={"task_name": "task1_flood_easy", "seed": 42})
 assert resp.status_code == 200
-obs = resp.json()
+reset_data = resp.json()
+assert "observation" in reset_data, "/reset must return {observation, reward, done, info}"
+assert "reward" in reset_data
+assert "done" in reset_data
+assert reset_data["done"] is False
+assert reset_data["reward"] == 0.0
+obs = reset_data["observation"]
 assert "step" in obs
 assert "pending_reports" in obs
 assert "available_resources" in obs
@@ -168,7 +174,8 @@ print("=" * 60)
 
 resp = client.post("/reset", json={})
 assert resp.status_code == 200
-obs = resp.json()
+reset_data = resp.json()
+obs = reset_data["observation"]
 assert obs["task_name"] == "task1_flood_easy"
 print(f"  Default reset: task={obs['task_name']}, step={obs['step']}")
 print("  PASS")

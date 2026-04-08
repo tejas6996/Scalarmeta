@@ -35,8 +35,8 @@ from src.env.environment import DisasterReliefEnv
 # ---------------------------------------------------------------------------
 
 API_KEY: str = os.environ.get("HF_TOKEN", "") or os.environ.get("API_KEY", "")
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/together/v1")
-MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-Turbo")
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/novita/v3/openai")
+MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 BENCHMARK: str = "disaster-relief-coordination"
 
 if not API_KEY:
@@ -330,7 +330,8 @@ def run_task(task_name: str, seed: int = 42, use_llm: bool = True) -> Dict[str, 
         If True, query the LLM for each step. If False, use heuristic only.
     """
     env = DisasterReliefEnv()
-    obs = env.reset(task_name, seed=seed)
+    result = env.reset(task_name, seed=seed)
+    obs = result["observation"]
 
     log_start(task_name)
 

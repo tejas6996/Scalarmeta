@@ -56,7 +56,8 @@ class DisasterReliefEnv:
         Returns
         -------
         dict
-            JSON-serializable initial observation.
+            JSON-serializable result with observation, reward, done, info —
+            same structure as step() for OpenEnv spec compliance.
         """
         if task_name not in SUPPORTED_TASKS:
             raise ValueError(
@@ -73,7 +74,12 @@ class DisasterReliefEnv:
         self._state.advance_time()
 
         obs = build_observation(self._state)
-        return obs.model_dump()
+        return StepResult(
+            observation=obs,
+            reward=0.0,
+            done=False,
+            info={"task_name": task_name, "seed": seed},
+        ).model_dump()
 
     def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """
