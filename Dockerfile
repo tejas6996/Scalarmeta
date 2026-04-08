@@ -22,6 +22,7 @@ ENV API_BASE_URL="https://api.openai.com/v1"
 ENV MODEL_NAME="gpt-4o-mini"
 ENV HF_TOKEN=""
 ENV PORT=7860
+ENV PYTHONPATH="/app"
 
 # ── Expose port 7860 (Hugging Face Spaces default) ───────────────────────────
 EXPOSE 7860

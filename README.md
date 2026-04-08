@@ -1,8 +1,8 @@
 ---
-title: Village Microgrid Energy Management
-emoji: ⚡
-colorFrom: yellow
-colorTo: green
+title: Disaster Relief Coordination
+emoji: 🚨
+colorFrom: red
+colorTo: orange
 sdk: docker
 app_port: 7860
 tags:
@@ -10,37 +10,40 @@ tags:
 pinned: false
 ---
 
-# Village Microgrid Energy Management — OpenEnv
+# Disaster Relief Coordination — OpenEnv
 
-An **OpenEnv-compatible** reinforcement learning environment where an AI agent
-acts as the energy controller for a small village microgrid.
+An **OpenEnv-compatible** environment where an LLM coordinator triages
+disaster reports, allocates limited resources, and resolves incidents
+under time pressure, uncertainty, and flood conditions.
 
 ---
 
 ## Environment Description
 
-The agent must balance three energy sources and two demand types across a
-24-hour (or 72-hour) simulation where **every step = 1 hour**.
+The agent acts as a **disaster relief coordination AI** managing a
+multi-zone disaster area. Each step, the agent must decide which tool
+to invoke — triaging incoming reports, dispatching resources, flagging
+false alarms, or monitoring active operations.
 
-**Sources**
-| Source | Description |
+**Key Challenges**
+| Challenge | Description |
 |---|---|
-| Solar panels | Variable generation based on time-of-day profile |
-| Battery | 40 kWh capacity, ±10 kWh/step charge/discharge rate |
-| Main grid | Unlimited import, but incurs a reward penalty |
+| Flood zones | Zones with flood depth ≥ 2 require flood-capable resources (boats, helicopters) |
+| False/duplicate reports | Agent must identify and flag false alarms without penalizing real incidents |
+| Critical deadlines | Critical reports expire if not resolved in time |
+| Resource constraints | Limited resources with different types, fuel, and flood capability |
+| Comms blackouts | Some zones temporarily lose communication |
+| Road blockages | Some zones have blocked access that clears mid-episode |
 
-**Demand**
-| Demand type | Description |
-|---|---|
-| `critical_demand_kwh` | Hospital + water pump — must NEVER be unmet |
-| `residential_demand_kwh` | Homes — can be shed if power is low |
-
-**Energy balance per step (simple arithmetic):**
-```
-available = solar + grid_import + battery_discharge
-used      = critical_demand + residential_supplied + battery_charge
-surplus   = available − used   (spilled if positive)
-```
+**Resources**
+| Type | Flood-capable | Description |
+|---|---|---|
+| Ambulance | No | Medical transport, capacity 2 |
+| Rescue Boat | Yes | Flood rescue, capacity 4 |
+| Supply Truck | No | Supplies/evacuation, capacity 20 |
+| Medical Team | No | On-site medical care, capacity 3 |
+| Helicopter | Yes | All-terrain, capacity 2 |
+| Engineering Crew | No | Structural/road repair, capacity 5 |
 
 ---
 
@@ -48,51 +51,66 @@ surplus   = available − used   (spilled if positive)
 
 | Field | Type | Description |
 |---|---|---|
-| `step_hour` | int [0,71] | Current simulation hour |
-| `solar_gen_kwh` | float ≥ 0 | Solar available this hour |
-| `battery_soc_kwh` | float ≥ 0 | Battery state-of-charge |
-| `critical_demand_kwh` | float ≥ 0 | Must-serve demand |
-| `residential_demand_kwh` | float ≥ 0 | Sheddable demand |
+| `step` | int | Current step (0-based) |
+| `max_steps` | int | Total steps in this episode |
+| `pending_reports` | array | Visible reports not yet resolved |
+| `active_assignments` | array | Dispatched resource assignments |
+| `available_resources` | array | All resources with type, status, flood capability |
+| `zones` | array | Zone conditions: flood depth, access, comms |
+| `recent_changes` | array | What changed since last step |
+| `warnings` | array | Deadline warnings, stuck resources |
+| `available_tools` | array | 12 tool names the agent can call |
+| `last_action_result` | string | Feedback from previous tool call |
+| `last_action_error` | string | Error if previous action was invalid |
 
 ---
 
 ## Action Space
 
-| Field | Type | Description |
+Each action is a tool call:
+```json
+{"tool": "<tool_name>", "args": {<arguments>}}
+```
+
+**Available Tools (12)**
+| Tool | Arguments | Description |
 |---|---|---|
-| `grid_import_kwh` | float ≥ 0 | Buy from main grid |
-| `battery_action_kwh` | float | + = charge, − = discharge |
-| `residential_supplied_kwh` | float ≥ 0 | How much residential to serve |
-
----
-
-## Reward Function
-
-| Event | Reward |
-|---|---|
-| Base survival | **+1.0** per step |
-| Unmet critical demand | **−5.0** × kWh unmet |
-| Unmet residential demand | **−0.5** × kWh unmet |
-| Grid import | **−0.1** × kWh imported |
-| Invalid action | **−1.0** per violation |
+| `call_intake_agent` | `report_id` | Classify + assess urgency + verify a report |
+| `send_resource` | `resource_id, report_id` | Dispatch a resource to a report |
+| `call_dispatch_agent` | `resource_id, report_id` | Query inventory then dispatch |
+| `mark_false_report` | `report_id, reason` | Flag a report as false alarm |
+| `check_operation` | `target_id` | Check status of report or assignment |
+| `call_monitor_agent` | `target_id` | Monitor and optionally close a case |
+| `close_case` | `assignment_id` | Close a completed assignment |
+| `get_resources` | *(none)* | List all resources and status |
+| `classify_report` | `report_id` | Classify a single report |
+| `assess_report_urgency` | `report_id` | Score a report's urgency |
+| `verify_report` | `report_id` | Verify a report's authenticity |
+| `reroute_resource` | `resource_id` | Reroute a stuck resource |
 
 ---
 
 ## Tasks
 
-| Task | Difficulty | Steps | Description |
-|---|---|---|---|
-| `task1_summer_day` | Easy | 24 | High solar, low demand, battery starts empty |
-| `task2_winter_night` | Medium | 24 | Minimal solar, battery starts full, grid is expensive |
-| `task3_rolling_blackout` | Hard | 72 | Erratic weather, 3 kWh/step grid import cap |
+| Task | Difficulty | Steps | Zones | Reports | Resources |
+|---|---|---|---|---|---|
+| `task1_flood_easy` | Easy | 12 | 1 | 6 | 5 |
+| `task2_storm_medium` | Medium | 15 | 3 | 12 | 6 |
+| `task3_cascade_hard` | Hard | 20 | 5 | 20 | 6 |
 
 ### Grading
 
-| Task | Score Logic |
+| Task | Score Formula |
 |---|---|
-| Task 1 | 0.0 if any critical failure; else 50% battery end-level + 50% residential service |
-| Task 2 | 0.0 if any critical failure; else penalises total grid import |
-| Task 3 | 60% critical uptime fraction + 40% residential service fraction |
+| Task 1 | 40% resolution + 30% critical + 30% efficiency |
+| Task 2 | 25% resolution + 20% critical + 20% F1 + 20% resource match + 15% counterfactual |
+| Task 3 | 20% resolution + 20% critical + 20% F1 + 15% resource + 15% monitoring + 10% counterfactual |
+
+**Advanced grading features:**
+- **F1-score** for false alarm detection (precision × recall)
+- **Resource type correctness** — did the agent send the right resource?
+- **Counterfactual penalty** — was a correct resource available when a critical report expired?
+- **Temporal urgency multiplier** — rewards scale 2.0x→1.0x as deadlines approach
 
 All scores are in **[0.0, 1.0]**.
 
@@ -104,8 +122,8 @@ All scores are in **[0.0, 1.0]**.
 |---|---|---|
 | `GET` | `/` | Health check |
 | `GET` | `/tasks` | List supported tasks |
-| `POST` | `/reset` | Start new episode `{"task_name": "..."}` |
-| `POST` | `/step` | Take action `{"action": {...}}` |
+| `POST` | `/reset` | Start new episode `{"task_name": "...", "seed": 42}` |
+| `POST` | `/step` | Take action `{"tool": "...", "args": {...}}` |
 | `GET` | `/state` | Internal state snapshot |
 | `POST` | `/grade` | Grade completed episode |
 
@@ -127,7 +145,12 @@ pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 7860
 ```
 
-### Run the baseline inference script
+### Run inference (heuristic-only, no API key needed)
+```bash
+python inference.py --heuristic-only
+```
+
+### Run inference (with LLM)
 ```bash
 export API_BASE_URL="https://api.openai.com/v1"
 export MODEL_NAME="gpt-4o-mini"
@@ -135,19 +158,14 @@ export HF_TOKEN="your-token-here"
 python inference.py
 ```
 
-### Run environment sanity check
-```bash
-python environment.py
-```
-
 ### Docker build & run
 ```bash
-docker build -t village-microgrid .
+docker build -t disaster-relief .
 docker run -p 7860:7860 \
   -e API_BASE_URL="https://api.openai.com/v1" \
   -e MODEL_NAME="gpt-4o-mini" \
   -e HF_TOKEN="your-token-here" \
-  village-microgrid
+  disaster-relief
 ```
 
 ---
@@ -155,14 +173,29 @@ docker run -p 7860:7860 \
 ## Project Structure
 
 ```
-village-microgrid-env/
-├── environment.py     # Core Pydantic models, VillageMicrogridEnv, Graders
-├── app.py             # FastAPI HTTP server (OpenEnv API)
-├── inference.py       # Baseline LLM inference script (required by spec)
-├── openenv.yaml       # OpenEnv spec file
+disaster-relief-coordination/
+├── app.py               # FastAPI HTTP server (OpenEnv API)
+├── inference.py          # LLM inference + heuristic fallback
+├── environment.py        # Root shim → src/env/environment.py
+├── openenv.yaml          # OpenEnv spec file
 ├── requirements.txt
 ├── Dockerfile
-└── README.md
+├── README.md
+├── server/
+│   └── app.py            # Uvicorn entry point
+└── src/env/
+    ├── models.py          # All Pydantic models (7 enums, 4 domain, API schemas)
+    ├── scenarios.py       # Deterministic scenario generator (3 tasks)
+    ├── state.py           # WorldState with advance_time() simulation tick
+    ├── tools_intake.py    # classify, urgency, verify
+    ├── tools_dispatch.py  # get_resources, send_resource, reroute
+    ├── tools_monitor.py   # check_operation, close_case, mark_false
+    ├── tools_coordinator.py # call_intake/dispatch/monitor_agent
+    ├── tool_registry.py   # Tool name → handler registry
+    ├── rewards.py         # Per-step reward computation
+    ├── graders.py         # Episode grading (F1, counterfactual, etc.)
+    ├── observation.py     # Observation builder
+    └── environment.py     # DisasterReliefEnv class
 ```
 
 ---
@@ -180,32 +213,16 @@ Set these as **Repository Secrets** in your Hugging Face Space.
 
 ---
 
-## Baseline Scores
+## Baseline Scores (Heuristic)
 
-Scores produced by the deterministic greedy heuristic (no LLM required).
-Run `python inference.py` with `HF_TOKEN` unset to reproduce exactly.
+Scores produced by the deterministic flood-aware heuristic (no LLM required).
+Run `python inference.py --heuristic-only` to reproduce.
 
-| Task | Score | Total Reward | Critical Failures | Notes |
+| Task | Score | Total Reward | Resolved | Critical Missed |
 |---|---|---|---|---|
-| `task1_summer_day` | **0.5000** | 17.21 | 0 | All demand met; battery did not reach 90% by end of day |
-| `task2_winter_night` | **0.5020** | 14.04 | 0 | No blackouts; score penalised for grid imports |
-| `task3_rolling_blackout` | **0.8429** | −10.60 | 0 | 72 h with erratic solar; near-perfect critical uptime |
+| `task1_flood_easy` | **0.5100** | 7.0 | 2/6 | 0 |
+| `task2_storm_medium` | **0.1822** | 4.0 | 2/13 | 0 |
+| `task3_cascade_hard` | **0.2221** | 1.4 | 3/23 | 0 |
 
-Scores are deterministic — the heuristic is seeded and the solar profiles are fixed.
-Achieve higher scores by improving the LLM prompt or implementing a planning algorithm.
-
----
-
-## Motivation
-
-Energy management for isolated village microgrids is a genuinely hard real-time
-optimisation problem faced by millions of communities in rural India, sub-Saharan
-Africa, and Southeast Asia. Decisions made by the grid controller directly affect
-whether a hospital stays powered, whether water pumps run, and whether homeowners
-have light after sunset — all under strict hardware limits and unpredictable solar
-generation.
-
-This environment makes that decision-making task learnable by an AI agent.
-It faithfully models the key trade-offs (battery degradation vs. grid cost vs.
-load shedding) at a level of fidelity useful for benchmarking planning and RL
-algorithms without requiring hardware-in-the-loop simulation.
+Scores are deterministic (seed=42). Achieve higher scores by improving LLM prompting
+or implementing a planning algorithm.

@@ -1,14 +1,15 @@
-name: village-microgrid-energy-management
+name: disaster-relief-coordination
 version: "1.0.0"
 tags:
   - openenv
-  - energy
-  - reinforcement-learning
+  - disaster-relief
+  - multi-agent
+  - coordination
 description: >
-  An OpenEnv-compatible RL environment where an agent controls a village
-  microgrid over a 24- or 72-hour horizon. The agent balances solar
-  generation, battery storage, and grid imports to meet critical and
-  residential electricity demand.
+  An OpenEnv-compatible environment where an LLM coordinator triages
+  disaster reports, allocates limited resources (ambulances, boats,
+  helicopters, medical teams), and resolves incidents under time pressure,
+  uncertainty, and flood conditions.
 
 author: "participant"
 license: MIT
@@ -18,48 +19,111 @@ license: MIT
 # ---------------------------------------------------------------------------
 observation:
   type: object
-  description: "Snapshot of the microgrid state at the start of each hourly step."
+  description: "Snapshot of the disaster coordination state at each step."
   properties:
-    step_hour:
+    step:
       type: integer
       minimum: 0
-      maximum: 71
-      description: "Current simulation hour (0-based)."
-    solar_gen_kwh:
-      type: number
-      minimum: 0
-      description: "Solar energy available this hour (kWh)."
-    battery_soc_kwh:
-      type: number
-      minimum: 0
-      description: "Battery state-of-charge (kWh)."
-    critical_demand_kwh:
-      type: number
-      minimum: 0
-      description: "Non-negotiable demand (hospital, water pump) in kWh."
-    residential_demand_kwh:
-      type: number
-      minimum: 0
-      description: "Sheddable residential demand in kWh."
+      description: "Current simulation step (0-based)."
+    max_steps:
+      type: integer
+      description: "Total steps in the episode."
+    task_name:
+      type: string
+      description: "Name of the current task."
+    pending_reports:
+      type: array
+      description: "Reports visible to the agent that have not been resolved/expired."
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          raw_text: { type: string }
+          zone_id: { type: string }
+          category: { type: string }
+          urgency: { type: integer, minimum: 0, maximum: 10 }
+          status: { type: string, enum: [pending, triaged, dispatched] }
+          is_critical: { type: boolean }
+          deadline_step: { type: integer, nullable: true }
+          classified: { type: boolean }
+          verified: { type: boolean }
+          verification_confidence: { type: number, nullable: true }
+    active_assignments:
+      type: array
+      description: "Currently active resource-to-report assignments."
+    available_resources:
+      type: array
+      description: "All resources and their current status."
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          type: { type: string, enum: [ambulance, rescue_boat, supply_truck, medical_team, helicopter, engineering_crew] }
+          status: { type: string, enum: [available, deployed, returning] }
+          can_traverse_flood: { type: boolean }
+    zones:
+      type: array
+      description: "Zone conditions — flood depth, access, communications."
+      items:
+        type: object
+        properties:
+          id: { type: string }
+          name: { type: string }
+          severity: { type: integer, minimum: 1, maximum: 5 }
+          flood_depth_level: { type: integer, minimum: 0, maximum: 3 }
+          access_blocked: { type: boolean }
+          comms_blackout: { type: boolean }
+    recent_changes:
+      type: array
+      items: { type: string }
+      description: "What changed since the last step."
+    warnings:
+      type: array
+      items: { type: string }
+      description: "Urgent warnings about deadlines, stuck resources, etc."
+    available_tools:
+      type: array
+      items: { type: string }
+      description: "Tool names the agent can call."
+    last_action_result:
+      type: string
+      nullable: true
+      description: "Feedback from the previous tool call."
+    last_action_error:
+      type: string
+      nullable: true
+      description: "Error if the previous action was invalid."
+    weather_severity:
+      type: integer
+      minimum: 1
+      maximum: 5
 
 # ---------------------------------------------------------------------------
 # Action space
 # ---------------------------------------------------------------------------
 action:
   type: object
-  description: "The agent's decisions for a single hour step."
+  description: "A tool call issued by the LLM coordinator each step."
   properties:
-    grid_import_kwh:
-      type: number
-      minimum: 0
-      description: "Power purchased from the main grid (kWh). Incurs a reward penalty."
-    battery_action_kwh:
-      type: number
-      description: "Battery action. Positive = charge; negative = discharge."
-    residential_supplied_kwh:
-      type: number
-      minimum: 0
-      description: "How much of the residential demand the agent fulfils (kWh)."
+    tool:
+      type: string
+      description: "Name of the tool to invoke."
+      enum:
+        - call_intake_agent
+        - call_dispatch_agent
+        - call_monitor_agent
+        - classify_report
+        - assess_report_urgency
+        - verify_report
+        - get_resources
+        - send_resource
+        - reroute_resource
+        - check_operation
+        - close_case
+        - mark_false_report
+    args:
+      type: object
+      description: "Arguments for the tool call (varies per tool)."
 
 # ---------------------------------------------------------------------------
 # Reward
@@ -67,80 +131,77 @@ action:
 reward:
   type: number
   description: >
-    Per-step scalar reward.
-    +1.0  base survival reward
-    -5.0 × unmet_critical_kwh
-    -0.5 × unmet_residential_kwh
-    -0.1 × grid_import_kwh
-    -1.0 × invalid_action_count
+    Per-step scalar reward. Base +0.5 per step.
+    Triage actions: +1.0 classify, +1.0 urgency, +0.5 verify.
+    Dispatch: +2.0 correct type, -1.0 wrong type, -1.0 false/duplicate.
+    False flagging: +1.0 correct, -1.5 wrong, -2.0 flagging critical.
+    Temporal multiplier: 2.0x→1.0x urgency bonus as deadline approaches.
+    Penalties: -0.5 malformed, -0.5 errors, -0.5 repeat actions.
 
 # ---------------------------------------------------------------------------
 # Tasks
 # ---------------------------------------------------------------------------
 tasks:
-  - name: task1_summer_day
+  - name: task1_flood_easy
     difficulty: easy
     description: >
-      Perfect summer day. High solar generation, low demand.
-      Battery starts empty. The agent should charge the battery using solar
-      and serve 100% of demand.
-    max_steps: 24
+      Single zone, 6 reports (2 critical), 5 resources.
+      Low flood depth, no blockages or blackouts.
+      Introduces the basic triage→dispatch→monitor loop.
+    max_steps: 12
     score_range: [0.0, 1.0]
-    grader: Task1Grader
+    grader: "40% resolution + 30% critical + 30% efficiency"
 
-  - name: task2_winter_night
+  - name: task2_storm_medium
     difficulty: medium
     description: >
-      Winter near-blackout. Minimal solar generation. Battery starts full.
-      The agent must ration battery discharge, carefully import grid power,
-      and potentially shed residential load to keep critical systems alive.
-    max_steps: 24
+      3 zones, 12 reports (4 critical, 2 duplicates, 2 false), 6 resources.
+      Flood depth up to 2, road blockages, comms blackouts.
+      Requires false alarm detection (F1-score), resource type matching,
+      and counterfactual analysis.
+    max_steps: 15
     score_range: [0.0, 1.0]
-    grader: Task2Grader
+    grader: "25% resolution + 20% critical + 20% F1 + 20% resource + 15% counterfactual"
 
-  - name: task3_rolling_blackout
+  - name: task3_cascade_hard
     difficulty: hard
     description: >
-      72-hour rolling blackout. Erratic weather causes unpredictable solar
-      spikes and drops. A hard cap of 3 kWh/step on grid imports forces
-      aggressive battery management and residential load queuing.
-    max_steps: 72
+      5 zones, 20 reports (7 critical, 4 duplicates, 3 false), 6 resources.
+      Deep flooding, multiple blockages and blackouts, fuel constraints.
+      Full grading: resolution, critical, F1, resource matching, monitoring,
+      and counterfactual penalty.
+    max_steps: 20
     score_range: [0.0, 1.0]
-    grader: Task3Grader
-
-# ---------------------------------------------------------------------------
-# Hardware constraints
-# ---------------------------------------------------------------------------
-hardware:
-  battery_capacity_kwh: 40.0
-  battery_max_charge_rate_kwh_per_step: 10.0
-  battery_max_discharge_rate_kwh_per_step: 10.0
-  task3_grid_import_cap_kwh_per_step: 3.0
+    grader: "20% resolution + 20% critical + 20% F1 + 15% resource + 15% monitoring + 10% counterfactual"
 
 # ---------------------------------------------------------------------------
 # API endpoints (served by app.py)
 # ---------------------------------------------------------------------------
 endpoints:
-  reset:
-    method: POST
-    path: /reset
-    description: "Start a new episode. Body: {task_name: string}"
-  step:
-    method: POST
-    path: /step
-    description: "Advance one hour step. Body: {action: Action}"
-  state:
+  health:
     method: GET
-    path: /state
-    description: "Return the full internal state snapshot."
+    path: /
+    description: "Health check. Returns {status: ok}."
   tasks:
     method: GET
     path: /tasks
     description: "List all supported task names."
+  reset:
+    method: POST
+    path: /reset
+    description: "Start a new episode. Body: {task_name: string, seed: int}"
+  step:
+    method: POST
+    path: /step
+    description: "Advance one step. Body: {tool: string, args: object}"
+  state:
+    method: GET
+    path: /state
+    description: "Return current internal state snapshot."
   grade:
     method: POST
     path: /grade
-    description: "Grade the completed episode. Returns score in [0, 1]."
+    description: "Grade the completed episode. Returns {score, task_name, ...}."
 
 runtime:
   port: 7860

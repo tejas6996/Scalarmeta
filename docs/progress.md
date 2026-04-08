@@ -1,6 +1,6 @@
 # Progress Log — Disaster Relief Coordination OpenEnv
 
-## Status: Phase 5 Complete
+## Status: ALL PHASES COMPLETE ✅
 
 ---
 
@@ -137,10 +137,83 @@
 
 ---
 
-## What's Next: Phase 6 — Main Environment Class + FastAPI
-Wire everything into DisasterReliefEnv with reset/step/state/grade, then build the server.
+## Phase 9: Final Wiring ✅
+**Completed:** April 8, 2026
+
+**Files modified:**
+- `openenv.yaml` — Full disaster relief spec (observation, action, reward, tasks, endpoints)
+- `README.md` — Complete rewrite with environment description, 12 tools, grading formulas, baseline scores
+- `Dockerfile` — Added PYTHONPATH=/app for src imports
+- `tests/run_all.py` — Test runner for all suites
+
+**All 17 tests pass across Phase 6/7/8 test suites.**
 
 ---
+
+## Phase 8: Inference Script ✅
+**Completed:** April 8, 2026
+
+**Files modified:**
+- `inference.py` — Complete rewrite: LLM coordinator with flood-aware heuristic fallback
+
+**What was built:**
+- LLM system prompt with 12 tools and strategy priorities
+- `_summarize_observation()` — concise text summary for LLM context
+- `_heuristic_action()` — flood-aware deterministic fallback
+- Structured [START]/[STEP]/[END] JSON logging
+- `--heuristic-only` CLI flag, `run_task()` episode runner
+
+**Heuristic scores:** task1=0.51, task2=0.18, task3=0.22
+
+---
+
+## Phase 7: FastAPI Server ✅
+**Completed:** April 8, 2026
+
+**Files modified:**
+- `app.py` — Complete rewrite: 6 endpoints for DisasterReliefEnv
+- `server/app.py` — Fixed uvicorn module path
+
+**6 endpoints:** GET /, GET /tasks, POST /reset, POST /step, GET /state, POST /grade.
+All responses JSON-serializable. Error handling: 400 for bad state, graceful unknown tools.
+
+---
+
+## What's Next: Phase 7 — FastAPI Server
+Build `server/app.py` with endpoints: GET /, GET /tasks, POST /reset, POST /step, GET /state, POST /grade.
+
+---
+
+## Phase 6: Environment Class + Observation Builder ✅
+**Completed:** April 8, 2026
+
+**Files created/modified:**
+- `src/env/observation.py` — Builds the Observation payload from WorldState (strips ground truth)
+- `src/env/environment.py` — DisasterReliefEnv class with reset/step/get_state/grade/close
+- `environment.py` (root) — Thin import shim for OpenEnv compatibility
+- `src/env/models.py` — Added ZoneSummary model, added can_traverse_flood to ResourceSummary, added zones to Observation
+- `src/env/__init__.py` — Added ZoneSummary, DisasterReliefEnv exports
+- `tests/test_environment.py` — Comprehensive Phase 6 test suite
+
+**What was built:**
+- **Observation builder**: Constructs LLM-facing observation each step — pending reports (sorted: critical first, urgency desc, deadline asc), active assignments, resource summaries with flood capability, zone summaries with flood depth/access/comms, recent changes, warnings, available tools
+- **DisasterReliefEnv**: Full OpenEnv interface — reset(task_name, seed) → observation dict, step(action) → StepResult dict, get_state() → EnvironmentState dict, grade() → score dict, close()
+- **ZoneSummary**: Exposes zone conditions (flood_depth_level, access_blocked, comms_blackout) to the agent — critical for flood-aware dispatch decisions
+- **Flood-aware test agent**: Test strategy checks zone flood depth before dispatching; only uses flood-capable resources for zones with flood_depth >= 2
+
+**Test results (all 5 tests pass):**
+- TEST 1: Full episode loop — task1 score 0.51, resolves 2/6, no critical missed
+- TEST 2: All 3 tasks — do-nothing vs flood-aware reasonable agent:
+  - task1: do-nothing=0.00, reasonable=0.51
+  - task2: do-nothing=0.00, reasonable=0.18
+  - task3: do-nothing=0.075, reasonable=0.22
+- TEST 3: Malformed actions handled gracefully (empty tool, missing tool, unknown tool)
+- TEST 4: All outputs JSON-serializable (observation, step result, state, grade)
+- TEST 5: close() cleans up correctly
+
+---
+
+## What was Phase 5:
 
 ## Phase 3: World State & State Transitions ✅
 **Completed:** April 8, 2026
