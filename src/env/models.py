@@ -291,6 +291,18 @@ class ResourceSummary(BaseModel):
     status: ResourceStatus
     assigned_report_id: Optional[str] = None
     location: str = "base"
+    can_traverse_flood: bool = False
+
+
+class ZoneSummary(BaseModel):
+    """Compact zone info exposed in observations."""
+    id: str
+    name: str
+    severity: int
+    access_blocked: bool = False
+    flood_depth_level: int = 0
+    comms_blackout: bool = False
+    open_incidents: int = 0
 
 
 class AssignmentSummary(BaseModel):
@@ -323,6 +335,10 @@ class Observation(BaseModel):
     available_resources: List[ResourceSummary] = Field(
         default_factory=list,
         description="Resources and their current status.",
+    )
+    zones: List[ZoneSummary] = Field(
+        default_factory=list,
+        description="Zone conditions — flood depth, access, comms status.",
     )
 
     recent_changes: List[str] = Field(

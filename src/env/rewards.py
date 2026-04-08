@@ -92,6 +92,24 @@ def compute_step_reward(
     if non_critical_misses > 0:
         reward.penalty += -0.5 * non_critical_misses
 
+    # --- Temporal urgency multiplier ---
+    # For dispatch/close actions on reports with deadlines, reward scales
+    # with how close to the deadline the action was taken.
+    if tool_name in ("send_resource", "call_dispatch_agent", "close_case") and tool_reward_delta > 0:
+        report_id = tool_args.get("report_id")
+        if report_id:
+            rpt = state.reports.get(report_id)
+            if rpt and rpt.deadline_step is not None and rpt.created_step < rpt.deadline_step:
+                window = rpt.deadline_step - rpt.created_step
+                elapsed = state.current_step - rpt.created_step
+                fraction_used = min(1.0, elapsed / max(window, 1))
+                # Multiplier: 2.0 if acted immediately → 1.0 if acted at deadline
+                multiplier = 1.0 + (1.0 - fraction_used)
+                if tool_name in _DISPATCH_TOOLS:
+                    reward.dispatch_reward *= multiplier
+                elif tool_name in _MONITOR_TOOLS:
+                    reward.monitor_reward *= multiplier
+
     # --- Compute total ---
     reward.total = (
         reward.base

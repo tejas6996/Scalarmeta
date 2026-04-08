@@ -94,32 +94,84 @@ class BaseGrader:
 
     def _verification_accuracy(self, state: WorldState) -> float:
         """
-        How accurately the agent identified false/duplicate reports.
-        Score = (correct_flags + correct_non_flags) / total_reports.
+        False alarm detection quality using F1-score.
+        Precision = correct flags / total flags (avoids flag-everything exploit).
+        Recall = correct flags / total actual false+dup reports (avoids ignore-everything).
+        Returns harmonic mean (F1). If no false reports exist, returns 1.0.
         """
-        total = len(state.reports)
-        if total == 0:
+        # Ground truth counts
+        actual_false_ids = {
+            rid for rid, gt in state.ground_truth.items()
+            if gt.get("verdict") in ("false", "duplicate")
+        }
+        if not actual_false_ids:
+            return 1.0  # nothing to detect
+
+        # Agent's flags
+        flagged_ids = {
+            rid for rid, rpt in state.reports.items()
+            if rpt.status == ReportStatus.FALSE
+        }
+
+        true_positives = len(flagged_ids & actual_false_ids)
+        false_positives = len(flagged_ids - actual_false_ids)
+        false_negatives = len(actual_false_ids - flagged_ids)
+
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0.0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0.0
+
+        if precision + recall == 0:
+            return 0.0
+        f1 = 2 * precision * recall / (precision + recall)
+        return f1
+
+    def _counterfactual_penalty(self, state: WorldState) -> float:
+        """
+        For each expired critical report, check if a correct resource type
+        was available at any step before the deadline. If so, the agent
+        *could* have acted but didn't — apply a harsher penalty.
+
+        Returns a score in [0.0, 1.0] where 1.0 = no preventable misses.
+        """
+        critical_ids = [
+            rid for rid, gt in state.ground_truth.items()
+            if gt.get("is_critical", False) and gt.get("verdict") == "real"
+        ]
+        if not critical_ids:
             return 1.0
 
-        correct = 0
-        for rid, rpt in state.reports.items():
+        preventable = 0
+        total_expired_critical = 0
+
+        for rid in critical_ids:
+            rpt = state.reports[rid]
+            if rpt.status != ReportStatus.EXPIRED:
+                continue
+            total_expired_critical += 1
+
             gt = state.ground_truth.get(rid, {})
-            verdict = gt.get("verdict", "real")
+            required = gt.get("required_resource")
+            if required is None:
+                continue
 
-            if verdict in ("false", "duplicate"):
-                # Should have been flagged
-                if rpt.status == ReportStatus.FALSE:
-                    correct += 1  # correctly flagged
-                # Not flagged but not dispatched either — neutral (0.5 credit)
-                elif rpt.status in (ReportStatus.PENDING, ReportStatus.TRIAGED):
-                    correct += 0.3
-            else:
-                # Real report — should NOT be flagged
-                if rpt.status != ReportStatus.FALSE:
-                    correct += 1  # correctly not flagged
-                # Flagged a real report — 0 credit
+            # Check availability log: was the correct resource type available
+            # at any step between report creation and deadline?
+            deadline = rpt.deadline_step or state.max_steps
+            for snapshot in state.availability_log:
+                snap_step = snapshot["step"]
+                if snap_step < rpt.created_step:
+                    continue
+                if snap_step > deadline:
+                    break
+                if required in snapshot.get("available", {}):
+                    preventable += 1
+                    break
 
-        return correct / total
+        if total_expired_critical == 0:
+            return 1.0  # no critical expirations
+
+        # Score: 1.0 if none were preventable, 0.0 if all were
+        return 1.0 - (preventable / total_expired_critical)
 
     def _resource_correctness(self, state: WorldState) -> float:
         """
@@ -201,25 +253,27 @@ class Task1Grader(BaseGrader):
 
 
 class Task2Grader(BaseGrader):
-    """task2_storm_medium: 30% resolution + 25% critical + 20% verification + 25% resource."""
+    """task2_storm_medium: 25% resolution + 20% critical + 20% F1 + 20% resource + 15% counterfactual."""
 
     def grade(self, state: WorldState) -> float:
         resolution = self._resolution_score(state)
         critical = self._critical_score(state)
         verification = self._verification_accuracy(state)
         resource = self._resource_correctness(state)
+        counterfactual = self._counterfactual_penalty(state)
 
         score = (
-            0.30 * resolution
-            + 0.25 * critical
+            0.25 * resolution
+            + 0.20 * critical
             + 0.20 * verification
-            + 0.25 * resource
+            + 0.20 * resource
+            + 0.15 * counterfactual
         )
         return round(max(0.0, min(1.0, score)), 4)
 
 
 class Task3Grader(BaseGrader):
-    """task3_cascade_hard: 25% resolution + 25% critical + 20% verification + 15% resource + 15% monitoring."""
+    """task3_cascade_hard: 20% resolution + 20% critical + 20% F1 + 15% resource + 15% monitoring + 10% counterfactual."""
 
     def grade(self, state: WorldState) -> float:
         resolution = self._resolution_score(state)
@@ -227,13 +281,15 @@ class Task3Grader(BaseGrader):
         verification = self._verification_accuracy(state)
         resource = self._resource_correctness(state)
         monitoring = self._monitoring_score(state)
+        counterfactual = self._counterfactual_penalty(state)
 
         score = (
-            0.25 * resolution
-            + 0.25 * critical
+            0.20 * resolution
+            + 0.20 * critical
             + 0.20 * verification
             + 0.15 * resource
             + 0.15 * monitoring
+            + 0.10 * counterfactual
         )
         return round(max(0.0, min(1.0, score)), 4)
 

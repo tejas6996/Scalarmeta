@@ -75,6 +75,10 @@ class WorldState:
         # Situation brief flag
         self.situation_brief_submitted: bool = False
 
+        # Availability snapshot log for counterfactual analysis
+        # Each entry: {step: int, available: {resource_type: [resource_id, ...]}}
+        self.availability_log: List[Dict[str, Any]] = []
+
         # Internal assignment counter
         self._next_assignment_idx: int = 1
 
@@ -275,9 +279,20 @@ class WorldState:
         # --- 8. Generate warnings ---
         self._generate_warnings(step)
 
-        # --- 9. Check episode termination ---
+        # --- 9. Snapshot availability for counterfactual analysis ---
+        self._snapshot_availability(step)
+
+        # --- 10. Check episode termination ---
         if step >= self.max_steps - 1:
             self.done = True
+
+    def _snapshot_availability(self, step: int) -> None:
+        """Record which resource types are available at this step."""
+        by_type: Dict[str, list] = {}
+        for res in self.resources.values():
+            if res.status == ResourceStatus.AVAILABLE:
+                by_type.setdefault(res.type.value, []).append(res.id)
+        self.availability_log.append({"step": step, "available": by_type})
 
     # ------------------------------------------------------------------
     # advance_time sub-routines

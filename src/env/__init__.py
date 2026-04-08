@@ -23,6 +23,7 @@ from src.env.models import (
     RouteStatus,
     StepResult,
     Zone,
+    ZoneSummary,
 )
 from src.env.scenarios import (
     SUPPORTED_TASKS,
@@ -35,6 +36,7 @@ from src.env.state import WorldState
 from src.env.tool_registry import execute_tool, get_tool_names, get_tool_signatures
 from src.env.rewards import compute_step_reward, compute_no_action_reward
 from src.env.graders import grade_episode
+from src.env.environment import DisasterReliefEnv
 
 __all__ = [
     "Action",
@@ -61,6 +63,7 @@ __all__ = [
     "TaskConfig",
     "WorldState",
     "Zone",
+    "ZoneSummary",
     "compute_no_action_reward",
     "compute_step_reward",
     "execute_tool",
@@ -68,4 +71,5 @@ __all__ = [
     "get_tool_names",
     "get_tool_signatures",
     "grade_episode",
+    "DisasterReliefEnv",
 ]
