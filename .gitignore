@@ -9,3 +9,6 @@ venv/
 dist/
 build/
 .DS_Store
+tests/
+docs
+disaster_relief_coordination.egg-info

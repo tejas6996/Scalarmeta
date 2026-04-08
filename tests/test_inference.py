@@ -1,5 +1,4 @@
 """Phase 8 test: inference.py heuristic mode (no LLM API needed)."""
-import json
 import sys
 from io import StringIO
 
@@ -153,17 +152,18 @@ for task in ["task1_flood_easy", "task2_storm_medium", "task3_cascade_hard"]:
     assert "reports_resolved" in result
     assert result["steps"] > 0
 
-    # Parse START log
+    # Parse START log — key=value format
     start_line = [l for l in log_output.split("\n") if l.startswith("[START]")][0]
-    start_data = json.loads(start_line.replace("[START] ", ""))
-    assert start_data["task"] == task
+    assert f"task={task}" in start_line, f"[START] missing task name"
+    assert "env=" in start_line, f"[START] missing env field"
+    assert "model=" in start_line, f"[START] missing model field"
 
-    # Parse END log
+    # Parse END log — key=value format
     end_line = [l for l in log_output.split("\n") if l.startswith("[END]")][0]
-    end_data = json.loads(end_line.replace("[END] ", ""))
-    assert end_data["task"] == task
-    assert "score" in end_data
-    assert "timestamp" in end_data
+    assert "success=" in end_line, f"[END] missing success field"
+    assert "steps=" in end_line, f"[END] missing steps field"
+    assert "score=" in end_line, f"[END] missing score field"
+    assert "rewards=" in end_line, f"[END] missing rewards field"
 
     print(f"  {task}: score={result['score']:.4f}  "
           f"reward={result['total_reward']:.1f}  "

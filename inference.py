@@ -7,17 +7,16 @@ The LLM receives the current observation as a structured prompt and returns
 a JSON tool call. A fallback heuristic is used if the model output cannot
 be parsed.
 
-Log format (MANDATORY — do not modify):
-  [START] {"task": ..., "timestamp": ...}
-  [STEP]  {"step": ..., "observation": ..., "action": ..., "reward": ..., "done": ...}
-  [END]   {"task": ..., "score": ..., "total_reward": ..., "critical_missed": ...,
-            "timestamp": ...}
+STDOUT FORMAT (MANDATORY — do not modify):
+  [START] task=<task_name> env=<benchmark> model=<model_name>
+  [STEP]  step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+  [END]   success=<true|false> steps=<n> score=<score> rewards=<r1,r2,...,rn>
 
 Environment variables required
 -------------------------------
-  API_BASE_URL   The base URL of the OpenAI-compatible API endpoint.
-  MODEL_NAME     The model identifier (e.g. "gpt-4o-mini").
-  HF_TOKEN       Your Hugging Face / API key (used as bearer token).
+  API_BASE_URL   The API endpoint for the LLM.
+  MODEL_NAME     The model identifier to use for inference.
+  HF_TOKEN       Your Hugging Face / API key.
 """
 
 from __future__ import annotations
@@ -25,7 +24,6 @@ from __future__ import annotations
 import json
 import os
 import sys
-from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
@@ -36,18 +34,19 @@ from src.env.environment import DisasterReliefEnv
 # Configuration from environment variables
 # ---------------------------------------------------------------------------
 
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
-MODEL_NAME: str = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN: str = os.environ.get("HF_TOKEN", "")
+API_KEY: str = os.environ.get("HF_TOKEN", "") or os.environ.get("API_KEY", "")
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/together/v1")
+MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-Turbo")
+BENCHMARK: str = "disaster-relief-coordination"
 
-if not HF_TOKEN:
+if not API_KEY:
     print(
         "WARNING: HF_TOKEN is not set. API calls may fail.",
         file=sys.stderr,
     )
 
 # OpenAI-compatible client (works with HF Inference, OpenAI, Together, etc.)
-client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
+client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 
 
 # ---------------------------------------------------------------------------
@@ -273,60 +272,42 @@ def _heuristic_action(obs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Helper: structured stdout logging
+# Helper: structured stdout logging (MANDATORY format)
 # ---------------------------------------------------------------------------
-
-def _ts() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def log_start(task_name: str) -> None:
     print(
-        "[START] "
-        + json.dumps({"task": task_name, "timestamp": _ts()}),
+        f"[START] task={task_name} env={BENCHMARK} model={MODEL_NAME}",
         flush=True,
     )
 
 
 def log_step(
     step: int,
-    observation: Dict[str, Any],
     action: Dict[str, Any],
     reward: float,
     done: bool,
+    error: Optional[str] = None,
 ) -> None:
+    action_str = f"{action.get('tool', 'unknown')}({json.dumps(action.get('args', {}), separators=(',', ':'))})"
+    done_val = str(done).lower()
+    error_val = error if error else "null"
     print(
-        "[STEP] "
-        + json.dumps(
-            {
-                "step": step,
-                "observation": observation,
-                "action": action,
-                "reward": round(reward, 4),
-                "done": done,
-            }
-        ),
+        f"[STEP] step={step} action={action_str} reward={reward:.2f} done={done_val} error={error_val}",
         flush=True,
     )
 
 
 def log_end(
-    task_name: str,
+    success: bool,
+    steps: int,
     score: float,
-    total_reward: float,
-    critical_missed: int,
+    rewards: List[float],
 ) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        "[END] "
-        + json.dumps(
-            {
-                "task": task_name,
-                "score": round(score, 4),
-                "total_reward": round(total_reward, 4),
-                "critical_missed": critical_missed,
-                "timestamp": _ts(),
-            }
-        ),
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -355,43 +336,56 @@ def run_task(task_name: str, seed: int = 42, use_llm: bool = True) -> Dict[str, 
 
     done = False
     step = 0
+    rewards: List[float] = []
+    success = False
+    grade: Dict[str, Any] = {}
 
-    while not done:
-        if use_llm:
-            action = get_llm_action(obs, task_name)
-        else:
-            action = _heuristic_action(obs)
+    try:
+        while not done:
+            if use_llm:
+                action = get_llm_action(obs, task_name)
+            else:
+                action = _heuristic_action(obs)
 
-        result = env.step(action)
-        next_obs = result["observation"]
-        reward = result["reward"]
-        done = result["done"]
+            result = env.step(action)
+            next_obs = result["observation"]
+            reward = result["reward"]
+            done = result["done"]
+            error = obs.get("last_action_error")
 
-        log_step(
-            step=step,
-            observation=obs,
-            action=action,
-            reward=reward,
-            done=done,
-        )
+            rewards.append(reward)
 
-        obs = next_obs
-        step += 1
+            log_step(
+                step=step,
+                action=action,
+                reward=reward,
+                done=done,
+                error=error,
+            )
 
-    grade = env.grade()
-    score = grade["score"]
-    total_reward = grade["total_reward"]
-    critical_missed = grade["critical_missed"]
+            obs = next_obs
+            step += 1
 
-    log_end(task_name, score, total_reward, critical_missed)
+        grade = env.grade()
+        score = min(max(grade["score"], 0.0), 1.0)  # clamp to [0, 1]
+        success = score > 0.0
+
+    except Exception as exc:
+        print(f"[DEBUG] Episode error: {exc}", file=sys.stderr)
+        score = 0.0
+        success = False
+
+    finally:
+        env.close()
+        log_end(success=success, steps=step, score=score, rewards=rewards)
 
     return {
         "task": task_name,
         "score": score,
-        "total_reward": total_reward,
-        "critical_missed": critical_missed,
-        "reports_resolved": grade["reports_resolved"],
-        "total_reports": grade["total_reports"],
+        "total_reward": sum(rewards),
+        "critical_missed": grade.get("critical_missed", 0),
+        "reports_resolved": grade.get("reports_resolved", 0),
+        "total_reports": grade.get("total_reports", 0),
         "steps": step,
     }
 
@@ -415,9 +409,9 @@ def main() -> None:
         result = run_task(task, use_llm=use_llm)
         results.append(result)
 
-    print("\n" + "=" * 60, flush=True)
-    print("SUMMARY", flush=True)
-    print("=" * 60, flush=True)
+    print("\n" + "=" * 60, file=sys.stderr, flush=True)
+    print("SUMMARY", file=sys.stderr, flush=True)
+    print("=" * 60, file=sys.stderr, flush=True)
     for r in results:
         print(
             f"  {r['task']}: score={r['score']:.4f}  "
@@ -425,36 +419,10 @@ def main() -> None:
             f"resolved={r['reports_resolved']}/{r['total_reports']}  "
             f"critical_missed={r['critical_missed']}  "
             f"steps={r['steps']}",
+            file=sys.stderr,
             flush=True,
         )
 
 
 if __name__ == "__main__":
     main()
-
-
-# ---------------------------------------------------------------------------
-# Entry point — run all 3 tasks
-# ---------------------------------------------------------------------------
-
-if __name__ == "__main__":
-    # Set use_llm=False to run in pure-heuristic mode (no API needed).
-    # Set use_llm=True to use the LLM defined by API_BASE_URL / MODEL_NAME.
-    use_llm = bool(HF_TOKEN)
-
-    results = []
-    for task in VillageMicrogridEnv.SUPPORTED_TASKS:
-        summary = run_task(task_name=task, use_llm=use_llm)
-        results.append(summary)
-
-    # Final summary table
-    print("\n" + "=" * 60, flush=True)
-    print("FINAL SCORES", flush=True)
-    print("=" * 60, flush=True)
-    for r in results:
-        print(
-            f"  {r['task']:35s}  score={r['score']:.4f}  "
-            f"reward={r['total_reward']:8.2f}  blackouts={r['critical_failures']}",
-            flush=True,
-        )
-    print("=" * 60, flush=True)
