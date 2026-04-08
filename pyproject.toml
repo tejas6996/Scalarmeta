@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "village-microgrid-energy-management"
+name = "disaster-relief-coordination"
 version = "1.0.0"
-description = "OpenEnv-compatible RL environment for village microgrid control"
+description = "OpenEnv-compatible RL environment for disaster relief coordination"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -26,3 +26,4 @@ server = "server.app:main"
 
 [tool.setuptools]
 py-modules = ["app", "environment", "inference"]
+packages = ["src", "src.env", "server"]
