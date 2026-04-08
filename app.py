@@ -93,7 +93,7 @@ def list_tasks():
 
 
 @app.post("/reset")
-def reset_env(request: ResetRequest):
+def reset_env(request: Optional[ResetRequest] = None):
     """
     Start a new episode.
 
@@ -106,7 +106,8 @@ def reset_env(request: ResetRequest):
     Returns the initial Observation for step 0.
     """
     try:
-        obs = env.reset(task_name=request.task_name, seed=request.seed)
+        req = request or ResetRequest()
+        obs = env.reset(task_name=req.task_name, seed=req.seed)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return obs
