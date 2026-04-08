@@ -9,43 +9,43 @@
 
 ---
 
-## Phase 1: Core Data Models
+## Phase 1: Core Data Models ✅ DONE
 **Goal:** Define every Pydantic model the system needs before writing any logic.
 
-### Steps
-1. **`src/env/models.py`** — Define all typed models:
-   - `Report` (id, raw_text, zone, category, urgency, ground_truth_real, ground_truth_duplicate_of, required_resource_type, deadline_step, status, created_step, resolved_step, assigned_resource_id)
-   - `Resource` (id, type, status: available/deployed/returning, assigned_report_id, location, eta_available_step)
-   - `Zone` (id, name, severity, access_blocked, open_incidents)
-   - `Assignment` (id, resource_id, report_id, created_step, route_status, status, expected_completion_step, stuck)
-   - `Observation` — the dict/model the LLM sees each step (step number, max_steps, pending_reports summary, active_assignments summary, available_resources summary, recent_changes, available_tools list, warnings)
-   - `Action` — single tool call: `{"tool": str, "args": dict}`
-   - `StepResult` — (observation, reward, done, info)
-   - `Reward` — structured breakdown (base, triage, dispatch, monitor, penalty, total)
-   - `EnvironmentState` — public snapshot for `/state`
-   - `EpisodeMemoryEntry` — (step, actor, tool, args, summary, result_status, reward, entities)
+### Delivered:
+- `src/env/models.py` — 7 enums, 4 domain models, 3 summary models, 6 API models
+- `src/env/__init__.py` — public exports
+- `src/__init__.py` — package marker
+- `pyproject.toml` — updated project name and packages
 
-2. **`src/env/__init__.py`** — Export public API.
-
-**Done when:** All models importable, `python -c "from src.env.models import *"` succeeds.
+### Enrichments added (vs original plan):
+- `ReporterType` enum (citizen, field_officer, automated_sensor)
+- `reported_people_count`, `language_noise`, `follow_up_of` on Report
+- `population_density`, `has_hospital`, `flood_depth_level`, `last_contact_step`, `comms_blackout`, `comms_restored_step` on Zone
+- `capacity`, `fuel_steps_remaining`, `can_traverse_flood` on Resource
+- `weather_severity`, `situation_brief_submitted` on Observation
 
 ---
 
-## Phase 2: Scenario Generator
+## Phase 2: Scenario Generator ✅ DONE
 **Goal:** Deterministically generate reports, resources, zones, and ground truth for each task.
 
-### Steps
-1. **`src/env/scenarios.py`** — Implement `generate_scenario(task_name, seed)` returning:
-   - List of `Report` objects (with staggered `created_step` so they arrive over time)
-   - List of `Resource` objects (ambulances, rescue boats, supply trucks, medical teams, etc.)
-   - List of `Zone` objects (with varying severity/access)
-   - Hidden ground truth dict (which reports are real, which are duplicates, which are false)
-   - Task parameters (max_steps, report_count, duplicate_rate, false_rate, blockage_rate)
+### Delivered:
+- `src/env/scenarios.py` — full deterministic scenario generator with `TaskConfig`, `Scenario`, `generate_scenario()`
+- Realistic unstructured report texts (clean + panicked/noisy for all 6 categories)
+- False alarm templates with vague/uncertain language
+- Follow-up report generation linked to originals
+- Zone gen with severity, flood depth, blockages, comms blackouts, hospitals
+- Resource gen with capacity, flood traversal, fuel constraints
+- Report staggering with front-loading
 
-2. Define **3 task configs**:
-   - `task1_flood_easy` — 1 zone, ~6 reports (1 false, 0 duplicates), 5 resources, 12 steps, no road blocks
-   - `task2_storm_medium` — 3 zones, ~12 reports (2 false, 2 duplicates), 6 resources, 18 steps, 1-2 blocked routes
-   - `task3_cascade_hard` — 5 zones, ~20 reports (3 false, 4 duplicates), 6 resources, 25 steps, multiple blockages, tight deadlines
+### Actual task configs (adjusted from original plan):
+- `task1_flood_easy` — 1 zone, 6 reports (1 false, 0 dup), 5 resources, **12 steps**
+- `task2_storm_medium` — 3 zones, 12+1 reports (2 false, 2 dup, 1 follow-up), 6 resources, **15 steps**
+- `task3_cascade_hard` — 5 zones, 20+3 reports (3 false, 4 dup, 3 follow-ups), 6 resources, **20 steps**
+
+### Change from original plan:
+- Step counts adjusted to 12/15/20 (was 12/18/25) to stay within 20-min inference budget
 
 3. Generate realistic synthetic report texts using templates + seeded randomization (e.g., "Flooding at {location}, {n} people trapped, need {resource_type}").
 
@@ -53,25 +53,19 @@
 
 ---
 
-## Phase 3: World State & State Transitions
+## Phase 3: World State & State Transitions ✅ DONE
 **Goal:** Build the mutable state container that all tools read from and write to.
 
-### Steps
-1. **`src/env/state.py`** — `WorldState` class:
-   - Holds reports (dict by id), resources (dict by id), zones (dict by id), assignments (dict by id)
-   - Holds episode memory list, reward accumulators, step counter
-   - Methods: `get_pending_reports(current_step)`, `get_available_resources()`, `get_active_assignments()`, `advance_time()` (move ETAs, mark completions, surface new reports)
-   - `advance_time()` is the key dynamic method — called each step to:
-     - Release reports whose `created_step <= current_step`
-     - Progress assignments (decrement ETAs, mark completed if done)
-     - Detect stuck/delayed assignments
-     - Update zone incident counts
-
-**Done when:** State can be initialized from scenario output, and `advance_time()` correctly progresses the world.
+### Delivered:
+- `src/env/state.py` — `WorldState` class with `advance_time()` and full assignment lifecycle
+- Query methods for visible/pending reports, available resources, active assignments
+- Mutation methods for creating assignments, resolving reports, releasing resources
+- 9-step `advance_time()`: comms restore → blockage clear → surface reports → progress assignments → fuel → expire → recount zones → warnings → termination
+- Blocked route penalty, stuck detection, fuel exhaustion, resource return cycle
 
 ---
 
-## Phase 4: Tool Implementations
+## Phase 4: Tool Implementations ✅ DONE
 **Goal:** Build all 12 tools as pure functions that take state + args and return (result_text, state_mutations, reward_delta).
 
 ### Steps
@@ -101,7 +95,7 @@
 
 ---
 
-## Phase 5: Reward Function
+## Phase 5: Reward Function ✅ DONE
 **Goal:** Dense per-step reward that reflects the masterplan's reward design.
 
 ### Steps
@@ -123,7 +117,7 @@
 
 ---
 
-## Phase 6: Graders
+## Phase 6: Graders ✅ DONE
 **Goal:** Episode-end scoring in [0.0, 1.0] per task.
 
 ### Steps

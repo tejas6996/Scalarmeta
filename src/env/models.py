@@ -34,6 +34,13 @@ class ReportVerdict(str, Enum):
     FALSE = "false"
 
 
+class ReporterType(str, Enum):
+    """Who submitted the report — affects credibility."""
+    CITIZEN = "citizen"
+    FIELD_OFFICER = "field_officer"
+    AUTOMATED_SENSOR = "automated_sensor"
+
+
 class ResourceType(str, Enum):
     """Types of deployable resources."""
     AMBULANCE = "ambulance"
@@ -122,6 +129,23 @@ class Report(BaseModel):
         default=None, description="ID of the resource currently assigned to this report.",
     )
 
+    # --- Enriched metadata ---
+    reporter_type: ReporterType = Field(
+        default=ReporterType.CITIZEN,
+        description="Who submitted the report (citizen, field_officer, automated_sensor).",
+    )
+    reported_people_count: Optional[int] = Field(
+        default=None, description="Number of people mentioned in the report (None = not stated).",
+    )
+    language_noise: bool = Field(
+        default=False,
+        description="Whether the text has typos, partial info, or panicked language.",
+    )
+    follow_up_of: Optional[str] = Field(
+        default=None,
+        description="If this is a follow-up report, the ID of the original report.",
+    )
+
     # --- Intake classification results (filled by tools) ---
     classified: bool = Field(default=False, description="Whether intake classification has been run.")
     urgency_assessed: bool = Field(default=False, description="Whether urgency assessment has been run.")
@@ -150,6 +174,18 @@ class Resource(BaseModel):
         default=None,
         description="Step at which this resource becomes available again (None = already available).",
     )
+    capacity: int = Field(
+        default=1, ge=1,
+        description="How many people/units this resource can serve (e.g. ambulance=2, truck=20).",
+    )
+    fuel_steps_remaining: Optional[int] = Field(
+        default=None,
+        description="Steps of fuel remaining before needing to return to base (None = unlimited).",
+    )
+    can_traverse_flood: bool = Field(
+        default=False,
+        description="Whether this resource can operate in flooded zones (boats, helicopters).",
+    )
 
 
 class Zone(BaseModel):
@@ -172,6 +208,30 @@ class Zone(BaseModel):
     blockage_clears_step: Optional[int] = Field(
         default=None,
         description="Step at which the blockage clears (None = no blockage or permanent).",
+    )
+    population_density: int = Field(
+        default=100, ge=0,
+        description="Approximate population in this zone. Affects urgency weighting.",
+    )
+    has_hospital: bool = Field(
+        default=False,
+        description="Whether a hospital is in this zone — auto-upgrades medical reports to critical.",
+    )
+    flood_depth_level: int = Field(
+        default=0, ge=0, le=3,
+        description="Flood depth: 0=dry, 1=shallow(vehicles ok), 2=moderate(boats needed), 3=deep(helicopter only).",
+    )
+    last_contact_step: Optional[int] = Field(
+        default=None,
+        description="Last step a report was received from this zone (None = never contacted).",
+    )
+    comms_blackout: bool = Field(
+        default=False,
+        description="Whether communication is currently blacked out in this zone.",
+    )
+    comms_restored_step: Optional[int] = Field(
+        default=None,
+        description="Step at which communications are restored (None = no blackout or permanent).",
     )
 
 
@@ -219,6 +279,9 @@ class ReportSummary(BaseModel):
     urgency_assessed: bool = False
     verified: bool = False
     verification_confidence: Optional[float] = None
+    reporter_type: ReporterType = ReporterType.CITIZEN
+    reported_people_count: Optional[int] = None
+    language_noise: bool = False
 
 
 class ResourceSummary(BaseModel):
@@ -282,6 +345,14 @@ class Observation(BaseModel):
     last_action_error: Optional[str] = Field(
         default=None,
         description="Error message if the previous action was malformed or invalid.",
+    )
+    weather_severity: int = Field(
+        default=1, ge=1, le=5,
+        description="Current overall weather severity 1-5. Affects zone conditions.",
+    )
+    situation_brief_submitted: bool = Field(
+        default=False,
+        description="Whether the coordinator has submitted an initial situation assessment.",
     )
 
 
