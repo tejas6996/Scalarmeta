@@ -15,7 +15,7 @@ POST /grade        — grade the current completed episode
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -93,20 +93,30 @@ def list_tasks():
 
 
 @app.post("/reset")
-def reset_env(request: ResetRequest):
+async def reset_env(raw: Request):
     """
     Start a new episode.
 
-    Body
-    ----
+    Body (all fields optional)
+    --------------------------
     ``task_name`` : one of ``task1_flood_easy`` | ``task2_storm_medium``
-                   | ``task3_cascade_hard``
+                   | ``task3_cascade_hard``  (default: task1_flood_easy)
     ``seed`` : int (default 42)
 
     Returns the initial Observation for step 0.
     """
     try:
-        obs = env.reset(task_name=request.task_name, seed=request.seed)
+        body = await raw.body()
+        data: Dict[str, Any] = {}
+        if body:
+            import json as _json
+            try:
+                data = _json.loads(body)
+            except Exception:
+                data = {}
+        task_name = data.get("task_name", "task1_flood_easy")
+        seed = int(data.get("seed", 42))
+        obs = env.reset(task_name=task_name, seed=seed)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return obs
