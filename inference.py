@@ -35,8 +35,8 @@ from src.env.environment import DisasterReliefEnv
 # ---------------------------------------------------------------------------
 
 API_KEY: str = os.environ.get("HF_TOKEN", "") or os.environ.get("API_KEY", "")
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/novita/v3/openai")
-MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/together/v1")
+MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-Turbo")
 BENCHMARK: str = "disaster-relief-coordination"
 
 if not API_KEY:

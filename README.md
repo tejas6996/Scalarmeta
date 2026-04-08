@@ -235,8 +235,8 @@ python inference.py --heuristic-only
 
 **Run with an LLM:**
 ```bash
-export API_BASE_URL="https://router.huggingface.co/novita/v3/openai"
-export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
+export API_BASE_URL="https://router.huggingface.co/together/v1"
+export MODEL_NAME="Qwen/Qwen2.5-7B-Instruct-Turbo"
 export HF_TOKEN="your-token-here"
 python inference.py
 ```
@@ -245,8 +245,8 @@ python inference.py
 ```bash
 docker build -t disaster-relief .
 docker run -p 7860:7860 \
-  -e API_BASE_URL="https://router.huggingface.co/novita/v3/openai" \
-  -e MODEL_NAME="Qwen/Qwen2.5-72B-Instruct" \
+  -e API_BASE_URL="https://router.huggingface.co/together/v1" \
+  -e MODEL_NAME="Qwen/Qwen2.5-7B-Instruct-Turbo" \
   -e HF_TOKEN="your-token-here" \
   disaster-relief
 ```
