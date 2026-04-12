@@ -35,8 +35,8 @@ from src.env.environment import DisasterReliefEnv
 # ---------------------------------------------------------------------------
 
 API_KEY: str = os.environ.get("HF_TOKEN", "") or os.environ.get("API_KEY", "")
-API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/together/v1")
-MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct-Turbo")
+API_BASE_URL: str = os.environ.get("API_BASE_URL", "https://router.huggingface.co/v1")
+MODEL_NAME: str = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 BENCHMARK: str = "disaster-relief-coordination"
 
 if not API_KEY:
@@ -54,45 +54,39 @@ client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """\
-You are a disaster relief coordination AI. You manage incoming disaster reports,
-allocate limited resources, and resolve incidents under time pressure.
+You are a disaster relief coordination AI. You triage reports, dispatch resources, and resolve incidents under time pressure. Your score depends on RESOLVING reports — not just triaging them.
 
-At each step you MUST return a JSON object (no markdown, no explanation) with:
-  {"tool": "<tool_name>", "args": {<tool_arguments>}}
+Reply with ONLY a JSON object: {"tool": "<name>", "args": {<arguments>}}
 
-Available tools:
-- call_intake_agent: Process a report through classification, urgency, and verification.
-  Args: {"report_id": "RPT-XXX"}
-- send_resource: Dispatch a resource to a report.
-  Args: {"resource_id": "RES-XXX", "report_id": "RPT-XXX"}
-- call_dispatch_agent: Query inventory then dispatch.
-  Args: {"resource_id": "RES-XXX", "report_id": "RPT-XXX"}
-- mark_false_report: Flag a report as false alarm.
-  Args: {"report_id": "RPT-XXX", "reason": "description"}
-- check_operation: Check status of a report or assignment.
-  Args: {"target_id": "RPT-XXX or ASG-XXX"}
-- call_monitor_agent: Monitor and optionally close a case.
-  Args: {"target_id": "RPT-XXX or ASG-XXX"}
-- close_case: Close a completed assignment.
-  Args: {"assignment_id": "ASG-XXX"}
-- get_resources: List all resources and their status.
-  Args: {}
-- classify_report: Classify a single report's category.
-  Args: {"report_id": "RPT-XXX"}
-- assess_report_urgency: Score a report's urgency.
-  Args: {"report_id": "RPT-XXX"}
-- verify_report: Verify a report's authenticity.
-  Args: {"report_id": "RPT-XXX"}
-- reroute_resource: Reroute a deployed resource.
-  Args: {"resource_id": "RES-XXX"}
+TOOLS (use only these):
+1. call_intake_agent(report_id): Runs classify+urgency+verify in ONE call. Use this for ANY unclassified report. NEVER call classify_report, assess_report_urgency, or verify_report separately — intake does all three.
+2. send_resource(resource_id, report_id): Dispatch a resource to handle a report. This is how reports get RESOLVED. You must dispatch to score points.
+3. mark_false_report(report_id, reason): Flag a report with verification_confidence < 0.3 as false.
+4. check_operation(target_id): Check status of a report or assignment.
+5. call_monitor_agent(target_id): Monitor/close a case.
+6. close_case(assignment_id): Close a completed assignment.
+7. reroute_resource(resource_id): Reroute a stuck deployed resource.
+8. get_resources(): List all resources.
+9. call_dispatch_agent(resource_id, report_id): Like send_resource but checks inventory first.
 
-Strategy priorities:
-1. Process unclassified reports first (call_intake_agent)
-2. Flag reports with low verification confidence (<0.3) as false
-3. Dispatch flood-capable resources (boats, helicopters) to zones with flood_depth >= 2
-4. Prioritize critical reports with approaching deadlines
-5. Monitor active assignments periodically
-6. Match resource types to incident categories when possible
+CRITICAL RULES:
+- RESOLVING reports is what scores points. Triage alone scores ZERO.
+- After intake on a report, IMMEDIATELY dispatch a resource to it in the next step.
+- Do NOT intake all reports before dispatching — interleave: intake → dispatch → intake → dispatch.
+- CRITICAL reports (marked CRIT) with deadlines MUST be dispatched ASAP. Earlier = higher score multiplier.
+- FLOOD ZONES (flood_depth >= 2): ONLY send flood-capable resources (rescue_boat, helicopter). Sending non-flood resources FAILS and wastes a step.
+- Match resource types: flood→rescue_boat, medical→medical_team, structural_collapse/fire/road_blockage→engineering_crew, evacuation→supply_truck.
+- Reports with verification_confidence < 0.3 after intake: mark_false_report immediately (saves resources).
+- NEVER repeat the same action twice in a row (repeat penalty).
+- Steps are LIMITED. Every wasted step means fewer reports resolved.
+
+PRIORITY ORDER each step:
+1. If a verified-false report exists (confidence < 0.3): mark_false_report
+2. If a classified CRITICAL report has no resource assigned and a matching resource is available: send_resource
+3. If an unclassified report exists: call_intake_agent on the highest-urgency one
+4. If a classified non-critical report has no resource and a matching resource is available: send_resource
+5. If assignments are stuck: reroute_resource
+6. If nothing else: check_operation on an active assignment
 """
 
 
@@ -106,9 +100,9 @@ def get_llm_action(obs: Dict[str, Any], task_name: str) -> Dict[str, Any]:
 
     user_content = (
         f"Task: {task_name}\n"
-        f"Step: {obs['step']}/{obs['max_steps']}\n\n"
+        f"Step: {obs['step']}/{obs['max_steps']} ({obs['max_steps'] - obs['step']} remaining)\n\n"
         f"{summary}\n\n"
-        "Return a JSON tool call."
+        "Return ONLY a JSON tool call. No explanation."
     )
     try:
         response = client.chat.completions.create(
@@ -138,134 +132,209 @@ def get_llm_action(obs: Dict[str, Any], task_name: str) -> Dict[str, Any]:
 
 
 def _summarize_observation(obs: Dict[str, Any]) -> str:
-    """Build a concise text summary of the observation for the LLM."""
+    """Build a concise text summary of the observation for the LLM (target <800 tokens)."""
     lines = []
 
-    # Zones
+    # Situation brief (only on step 0)
+    if obs.get("situation_brief"):
+        lines.append(obs["situation_brief"])
+        lines.append("")
+
+    # Zones — only show zones with notable conditions
     zones = obs.get("zones", [])
+    zone_map = {z["id"]: z for z in zones}
     if zones:
-        zone_info = {z["id"]: z for z in zones}
-        lines.append("Zones:")
-        for z in zones:
-            flags = []
-            if z["flood_depth_level"] >= 2:
-                flags.append(f"FLOODED(depth={z['flood_depth_level']})")
-            if z["access_blocked"]:
-                flags.append("BLOCKED")
-            if z["comms_blackout"]:
-                flags.append("NO_COMMS")
-            lines.append(f"  {z['id']} ({z['name']}): severity={z['severity']} {' '.join(flags)}")
-    else:
-        zone_info = {}
+        notable = [z for z in zones if z["flood_depth_level"] >= 1 or z["access_blocked"] or z["comms_blackout"] or z["severity"] >= 3]
+        if notable:
+            lines.append("Zone conditions:")
+            for z in notable:
+                flags = []
+                if z["flood_depth_level"] >= 2:
+                    flags.append(f"FLOOD-depth{z['flood_depth_level']}(needs boat/heli)")
+                elif z["flood_depth_level"] == 1:
+                    flags.append("shallow-flood")
+                if z["access_blocked"]:
+                    flags.append("BLOCKED")
+                if z["comms_blackout"]:
+                    flags.append("NO-COMMS")
+                lines.append(f"  {z['id']}: sev={z['severity']} {' '.join(flags)}")
 
-    # Pending reports
-    pending = obs.get("pending_reports", [])
-    if pending:
-        lines.append(f"\nPending reports ({len(pending)}):")
-        for r in pending[:8]:  # limit to 8 to fit context
-            crit = "CRITICAL " if r["is_critical"] else ""
-            dl = f" deadline=step{r['deadline_step']}" if r.get("deadline_step") else ""
-            cat = r["category"] if r["classified"] else "unclassified"
-            ver = ""
-            if r["verified"] and r.get("verification_confidence") is not None:
-                ver = f" conf={r['verification_confidence']:.1f}"
-            assigned = f" assigned={r['assigned_resource_id']}" if r.get("assigned_resource_id") else ""
-            lines.append(
-                f"  {r['id']}: {crit}{cat} zone={r['zone_id']} "
-                f"urgency={r['urgency']} status={r['status']}{dl}{ver}{assigned}"
-            )
-        if len(pending) > 8:
-            lines.append(f"  ... and {len(pending) - 8} more")
-
-    # Active assignments
-    assignments = obs.get("active_assignments", [])
-    if assignments:
-        lines.append(f"\nActive assignments ({len(assignments)}):")
-        for a in assignments[:5]:
-            stuck = " STUCK" if a["stuck"] else ""
-            lines.append(
-                f"  {a['id']}: {a['resource_id']}→{a['report_id']} "
-                f"status={a['status']} ETA=step{a['expected_completion_step']}{stuck}"
-            )
-
-    # Resources
+    # Resources — show BEFORE reports so LLM knows what's available for dispatch
     resources = obs.get("available_resources", [])
     avail = [r for r in resources if r["status"] == "available"]
-    deployed = [r for r in resources if r["status"] == "deployed"]
-    lines.append(f"\nResources: {len(avail)} available, {len(deployed)} deployed, {len(resources)} total")
-    if avail:
-        for r in avail:
-            flood = " flood-capable" if r.get("can_traverse_flood") else ""
-            lines.append(f"  {r['id']}: {r['type']} [available]{flood}")
+    lines.append(f"\nResources: {len(avail)} avail / {len(resources)} total")
+    for r in avail:
+        flood = " FLOOD-OK" if r.get("can_traverse_flood") else ""
+        lines.append(f"  {r['id']}: {r['type']}{flood}")
 
-    # Warnings
-    warnings = obs.get("warnings", [])
-    if warnings:
-        lines.append("\nWARNINGS:")
-        for w in warnings:
-            lines.append(f"  ⚠ {w}")
+    # Pending reports — cap at 6, prioritized, with dispatch hints
+    pending = obs.get("pending_reports", [])
+    if pending:
+        # Separate into needs-intake vs ready-to-dispatch
+        needs_intake = [r for r in pending if not r["classified"]]
+        ready = [r for r in pending if r["classified"] and not r.get("assigned_resource_id")]
+        dispatched = [r for r in pending if r.get("assigned_resource_id")]
 
-    # Last action feedback
+        if ready:
+            lines.append(f"\nREADY TO DISPATCH ({len(ready)}):")
+            for r in ready[:4]:
+                crit = "CRIT " if r["is_critical"] else ""
+                dl = f" DL=s{r['deadline_step']}" if r.get("deadline_step") else ""
+                ver = ""
+                if r["verified"] and r.get("verification_confidence") is not None:
+                    conf = r["verification_confidence"]
+                    ver = f" v={conf:.1f}"
+                    if conf < 0.3:
+                        ver += " FALSE?"
+                zone = zone_map.get(r.get("zone_id", ""), {})
+                flood_note = f" FLOOD-ZONE" if zone.get("flood_depth_level", 0) >= 2 else ""
+                needed = _CATEGORY_RESOURCE.get(r.get("category", ""), "?")
+                lines.append(f"  {r['id']}: {crit}{r['category']} z={r['zone_id']}{flood_note} u={r['urgency']}{dl}{ver} needs={needed}")
+
+        if needs_intake:
+            lines.append(f"\nNEEDS INTAKE ({len(needs_intake)}):")
+            for r in needs_intake[:3]:
+                crit = "CRIT " if r["is_critical"] else ""
+                dl = f" DL=s{r['deadline_step']}" if r.get("deadline_step") else ""
+                lines.append(f"  {r['id']}: {crit}unclassified z={r['zone_id']} u={r['urgency']}{dl}")
+
+        if dispatched:
+            lines.append(f"\nDISPATCHED ({len(dispatched)}): {', '.join(r['id'] for r in dispatched[:3])}")
+
+    # Active assignments — compact
+    assignments = obs.get("active_assignments", [])
+    if assignments:
+        lines.append(f"\nAssignments ({len(assignments)}):")
+        for a in assignments[:4]:
+            stuck = " STUCK" if a["stuck"] else ""
+            lines.append(f"  {a['id']}: {a['resource_id']}→{a['report_id']} ETA=s{a['expected_completion_step']}{stuck}")
+
+    # Warnings — always show
+    for w in obs.get("warnings", []):
+        lines.append(f"  ⚠ {w}")
+
+    # Last feedback — truncated
     if obs.get("last_action_result"):
-        lines.append(f"\nLast result: {obs['last_action_result'][:150]}")
+        lines.append(f"\nResult: {obs['last_action_result'][:120]}")
     if obs.get("last_action_error"):
-        lines.append(f"\nLast error: {obs['last_action_error'][:150]}")
+        lines.append(f"\nError: {obs['last_action_error'][:120]}")
 
     return "\n".join(lines)
 
 
+_CATEGORY_RESOURCE = {
+    "flood": "rescue_boat",
+    "structural_collapse": "engineering_crew",
+    "medical": "medical_team",
+    "fire": "engineering_crew",
+    "road_blockage": "engineering_crew",
+    "evacuation": "supply_truck",
+}
+
+
+def _pick_resource(
+    rpt: Dict[str, Any],
+    avail: List[Dict[str, Any]],
+    zones: Dict[str, Any],
+    allow_mismatch: bool = False,
+) -> Optional[Dict[str, Any]]:
+    """Pick the best available resource for a report (type-match + flood-aware).
+    
+    If allow_mismatch is False, returns None when no type-matched resource is found.
+    Critical reports near deadline always allow mismatch.
+    """
+    zone = zones.get(rpt.get("zone_id", ""), {})
+    flood_depth = zone.get("flood_depth_level", 0)
+
+    candidates = list(avail)
+    if flood_depth >= 2:
+        flood_capable = [r for r in candidates if r.get("can_traverse_flood", False)]
+        if flood_capable:
+            candidates = flood_capable
+        else:
+            return None  # can't reach this zone
+
+    # Prefer type match
+    needed = _CATEGORY_RESOURCE.get(rpt.get("category", ""), "")
+    for r in candidates:
+        if r["type"] == needed:
+            return r
+
+    # Fallback: any available resource (only if allowed or critical with tight deadline)
+    if allow_mismatch or rpt.get("is_critical"):
+        return candidates[0] if candidates else None
+    return None
+
+
 def _heuristic_action(obs: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Deterministic flood-aware heuristic. Used as fallback when the LLM
-    returns an unparseable response, or for offline testing.
+    Deterministic flood-aware, type-aware heuristic. Used as fallback when
+    the LLM returns an unparseable response, or for offline testing.
+
+    Optimized to maximize throughput in limited steps:
+    1. Flag verified false reports immediately
+    2. Dispatch critical triaged reports (type-matched)
+    3. Intake unclassified reports
+    4. Dispatch non-critical triaged reports
+    5. Monitor only when nothing else to do
     """
     pending = obs.get("pending_reports", [])
     resources = obs.get("available_resources", [])
     assignments = obs.get("active_assignments", [])
     zones = {z["id"]: z for z in obs.get("zones", [])}
 
-    if not pending:
-        # Nothing to do — monitor an active assignment if any
+    avail = [r for r in resources if r["status"] == "available"]
+
+    # Focus on actionable reports (not yet dispatched)
+    actionable = [
+        r for r in pending
+        if r["status"] in ("pending", "triaged")
+        and r.get("assigned_resource_id") is None
+    ]
+
+    if not actionable:
         if assignments:
+            stuck = [a for a in assignments if a.get("stuck")]
+            if stuck:
+                return {"tool": "reroute_resource", "args": {"resource_id": stuck[0]["resource_id"]}}
             return {"tool": "check_operation", "args": {"target_id": assignments[0]["report_id"]}}
         return {"tool": "get_resources", "args": {}}
 
-    # Pick highest priority pending report
-    rpt = pending[0]
+    # Priority 1: Flag verified low-confidence reports as false (saves resources)
+    for rpt in actionable:
+        if rpt["verified"] and rpt.get("verification_confidence", 1.0) < 0.3:
+            return {"tool": "mark_false_report", "args": {
+                "report_id": rpt["id"], "reason": "low verification confidence"
+            }}
 
-    # Step 1: Intake unclassified reports
-    if not rpt["classified"]:
-        return {"tool": "call_intake_agent", "args": {"report_id": rpt["id"]}}
+    # Priority 2: Dispatch critical triaged reports with type-matched resources
+    for rpt in actionable:
+        if rpt["classified"] and rpt["is_critical"] and avail:
+            best = _pick_resource(rpt, avail, zones)
+            if best:
+                return {"tool": "send_resource", "args": {
+                    "resource_id": best["id"], "report_id": rpt["id"]
+                }}
 
-    # Step 2: Flag low-confidence reports as false
-    if rpt["verified"] and rpt.get("verification_confidence", 1.0) < 0.3:
-        return {"tool": "mark_false_report", "args": {"report_id": rpt["id"], "reason": "low verification confidence"}}
+    # Priority 3: Intake unclassified reports (critical-flagged first)
+    for rpt in actionable:
+        if not rpt["classified"]:
+            return {"tool": "call_intake_agent", "args": {"report_id": rpt["id"]}}
 
-    # Step 3: Dispatch — flood-aware and type-aware
-    if rpt.get("assigned_resource_id") is None and rpt["status"] in ("pending", "triaged"):
-        zone = zones.get(rpt.get("zone_id", ""), {})
-        flood_depth = zone.get("flood_depth_level", 0)
+    # Priority 4: Dispatch non-critical triaged reports
+    for rpt in actionable:
+        if rpt["classified"] and avail:
+            best = _pick_resource(rpt, avail, zones)
+            if best:
+                return {"tool": "send_resource", "args": {
+                    "resource_id": best["id"], "report_id": rpt["id"]
+                }}
 
-        avail = [r for r in resources if r["status"] == "available"]
-
-        # Filter for flood capability if needed
-        if flood_depth >= 2:
-            flood_avail = [r for r in avail if r.get("can_traverse_flood", False)]
-            if flood_avail:
-                avail = flood_avail
-            else:
-                # No flood-capable resource — skip to next report or monitor
-                if len(pending) > 1:
-                    next_rpt = pending[1]
-                    if not next_rpt["classified"]:
-                        return {"tool": "call_intake_agent", "args": {"report_id": next_rpt["id"]}}
-                return {"tool": "check_operation", "args": {"target_id": rpt["id"]}}
-
-        if avail:
-            return {"tool": "send_resource", "args": {"resource_id": avail[0]["id"], "report_id": rpt["id"]}}
-
-    # Step 4: Monitor if nothing else
+    # Priority 5: Monitor active assignments
     if assignments:
+        stuck = [a for a in assignments if a.get("stuck")]
+        if stuck:
+            return {"tool": "reroute_resource", "args": {"resource_id": stuck[0]["resource_id"]}}
         return {"tool": "check_operation", "args": {"target_id": assignments[0]["report_id"]}}
 
     return {"tool": "get_resources", "args": {}}

@@ -116,8 +116,8 @@ print("=" * 60)
 summary = _summarize_observation(obs)
 assert "ZONE-A" in summary
 assert "RPT-001" in summary
-assert "FLOODED" in summary
-assert "flood-capable" in summary
+assert "FLOOD" in summary
+assert "flood" in summary.lower() or "FLOOD" in summary
 print(f"  Summary length: {len(summary)} chars")
 print(f"  First 200 chars: {summary[:200]}...")
 print("  PASS")

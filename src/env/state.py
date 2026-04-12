@@ -491,6 +491,16 @@ class WorldState:
                     f"LOW FUEL: Resource {res.id} has only {res.fuel_steps_remaining} fuel step(s) left."
                 )
 
+        # Active assignment monitoring nudge
+        for asg in self.assignments.values():
+            if asg.status in (AssignmentStatus.EN_ROUTE, AssignmentStatus.ON_SITE):
+                age = step - asg.created_step
+                if age >= 3:
+                    self.warnings.append(
+                        f"MONITOR: Assignment {asg.id} ({asg.resource_id}→{asg.report_id}) "
+                        f"has been active for {age} steps — consider checking status."
+                    )
+
     # ------------------------------------------------------------------
     # Summary helpers (for graders / state endpoint)
     # ------------------------------------------------------------------

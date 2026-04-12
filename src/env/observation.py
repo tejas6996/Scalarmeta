@@ -111,6 +111,11 @@ def build_observation(
             open_incidents=z.open_incidents,
         ))
 
+    # --- Situation brief (step 0 only) ---
+    brief = None
+    if state.current_step == 0:
+        brief = _generate_situation_brief(state, pending_reports, resources, zones)
+
     return Observation(
         step=state.current_step,
         max_steps=state.max_steps,
@@ -126,4 +131,44 @@ def build_observation(
         last_action_error=last_action_error,
         weather_severity=state.weather_severity,
         situation_brief_submitted=state.situation_brief_submitted,
+        situation_brief=brief,
     )
+
+
+def _generate_situation_brief(
+    state: WorldState,
+    pending_reports: List[ReportSummary],
+    resources: List[ResourceSummary],
+    zones: List[ZoneSummary],
+) -> str:
+    """Generate a concise crisis summary for the coordinator at episode start."""
+    total_reports = len(state.reports)
+    critical = sum(1 for r in state.reports.values() if r.is_critical)
+    initial_visible = len(pending_reports)
+
+    zone_count = len(zones)
+    flooded = [z for z in zones if z.flood_depth_level >= 2]
+    blocked = [z for z in zones if z.access_blocked]
+    blacked_out = [z for z in zones if z.comms_blackout]
+
+    avail = [r for r in resources if r.status.value == "available"]
+    flood_capable = [r for r in avail if r.can_traverse_flood]
+
+    parts = [f"ALERT: Disaster coordination active across {zone_count} zone(s)."]
+    parts.append(f"{initial_visible} initial reports received ({critical} confirmed critical).")
+    parts.append(f"More reports expected — up to {total_reports} total over {state.max_steps} steps.")
+
+    if flooded:
+        names = ", ".join(z.id for z in flooded)
+        parts.append(f"Deep flooding in {names} — requires boats or helicopters.")
+    if blocked:
+        names = ", ".join(z.id for z in blocked)
+        parts.append(f"Road access blocked in {names}.")
+    if blacked_out:
+        names = ", ".join(z.id for z in blacked_out)
+        parts.append(f"Communications down in {names} — reports from these zones delayed.")
+
+    parts.append(f"{len(avail)} resources available ({len(flood_capable)} flood-capable).")
+    parts.append("Prioritize: triage critical reports, dispatch correct resource types, flag false alarms.")
+
+    return " ".join(parts)

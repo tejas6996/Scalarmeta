@@ -97,6 +97,10 @@ observation:
       type: integer
       minimum: 1
       maximum: 5
+    situation_brief:
+      type: string
+      nullable: true
+      description: "Concise crisis summary generated at episode start (step 0 only)."
 
 # ---------------------------------------------------------------------------
 # Action space
@@ -131,7 +135,7 @@ action:
 reward:
   type: number
   description: >
-    Per-step scalar reward. Base +0.5 per step.
+    Per-step scalar reward. Base +0.1 per step.
     Triage actions: +1.0 classify, +1.0 urgency, +0.5 verify.
     Dispatch: +2.0 correct type, -1.0 wrong type, -1.0 false/duplicate.
     False flagging: +1.0 correct, -1.5 wrong, -2.0 flagging critical.
@@ -155,24 +159,24 @@ tasks:
   - name: task2_storm_medium
     difficulty: medium
     description: >
-      3 zones, 12 reports (4 critical, 2 duplicates, 2 false), 6 resources.
+      3 zones, 11 reports (3 critical, 1 duplicate, 2 false), 6 resources.
       Flood depth up to 2, road blockages, comms blackouts.
       Requires false alarm detection (F1-score), resource type matching,
       and counterfactual analysis.
-    max_steps: 15
+    max_steps: 20
     score_range: [0.0, 1.0]
-    grader: "25% resolution + 20% critical + 20% F1 + 20% resource + 15% counterfactual"
+    grader: "30% resolution + 25% critical + 15% F1 + 15% resource + 15% counterfactual"
 
   - name: task3_cascade_hard
     difficulty: hard
     description: >
-      5 zones, 20 reports (7 critical, 4 duplicates, 3 false), 6 resources.
+      5 zones, 17 reports (4 critical, 2 duplicates, 3 false), 6 resources.
       Deep flooding, multiple blockages and blackouts, fuel constraints.
       Full grading: resolution, critical, F1, resource matching, monitoring,
       and counterfactual penalty.
-    max_steps: 20
+    max_steps: 30
     score_range: [0.0, 1.0]
-    grader: "20% resolution + 20% critical + 20% F1 + 15% resource + 15% monitoring + 10% counterfactual"
+    grader: "30% resolution + 25% critical + 15% F1 + 10% resource + 10% monitoring + 10% counterfactual"
 
 # ---------------------------------------------------------------------------
 # API endpoints (served by app.py)
