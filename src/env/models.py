@@ -370,6 +370,10 @@ class Observation(BaseModel):
         default=False,
         description="Whether the coordinator has submitted an initial situation assessment.",
     )
+    situation_brief: Optional[str] = Field(
+        default=None,
+        description="A concise crisis summary generated at episode start (step 0 only).",
+    )
 
 
 # ---------------------------------------------------------------------------

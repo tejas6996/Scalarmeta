@@ -22,7 +22,7 @@ _TRIAGE_TOOLS = {"classify_report", "assess_report_urgency", "verify_report", "c
 _DISPATCH_TOOLS = {"get_resources", "send_resource", "reroute_resource", "call_dispatch_agent"}
 _MONITOR_TOOLS = {"check_operation", "close_case", "mark_false_report", "call_monitor_agent"}
 
-BASE_REWARD = 0.5
+BASE_REWARD = 0.1
 REPEAT_PENALTY = -0.5
 
 

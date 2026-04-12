@@ -253,7 +253,7 @@ class Task1Grader(BaseGrader):
 
 
 class Task2Grader(BaseGrader):
-    """task2_storm_medium: 25% resolution + 20% critical + 20% F1 + 20% resource + 15% counterfactual."""
+    """task2_storm_medium: 30% resolution + 25% critical + 15% F1 + 15% resource + 15% counterfactual."""
 
     def grade(self, state: WorldState) -> float:
         resolution = self._resolution_score(state)
@@ -263,17 +263,17 @@ class Task2Grader(BaseGrader):
         counterfactual = self._counterfactual_penalty(state)
 
         score = (
-            0.25 * resolution
-            + 0.20 * critical
-            + 0.20 * verification
-            + 0.20 * resource
+            0.30 * resolution
+            + 0.25 * critical
+            + 0.15 * verification
+            + 0.15 * resource
             + 0.15 * counterfactual
         )
         return round(max(0.0, min(1.0, score)), 4)
 
 
 class Task3Grader(BaseGrader):
-    """task3_cascade_hard: 20% resolution + 20% critical + 20% F1 + 15% resource + 15% monitoring + 10% counterfactual."""
+    """task3_cascade_hard: 30% resolution + 25% critical + 15% F1 + 10% resource + 10% monitoring + 10% counterfactual."""
 
     def grade(self, state: WorldState) -> float:
         resolution = self._resolution_score(state)
@@ -284,11 +284,11 @@ class Task3Grader(BaseGrader):
         counterfactual = self._counterfactual_penalty(state)
 
         score = (
-            0.20 * resolution
-            + 0.20 * critical
-            + 0.20 * verification
-            + 0.15 * resource
-            + 0.15 * monitoring
+            0.30 * resolution
+            + 0.25 * critical
+            + 0.15 * verification
+            + 0.10 * resource
+            + 0.10 * monitoring
             + 0.10 * counterfactual
         )
         return round(max(0.0, min(1.0, score)), 4)
